@@ -1,5 +1,7 @@
 package com.github.terrakok.wikwok.ui
 
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.terrakok.wikwok.data.WikipediaRepository
@@ -140,15 +142,18 @@ class WikiscrollViewModel(
     }
 
     /**
-     * Articles that already produced a like or an open.
+     * Articles the reader has liked in this session.
      *
-     * Both are one-shot per article. The policy scores a like as +5 and has no unlike event, so a
-     * second tap on the same card would inflate the profile with a signal the reader never meant
-     * to give twice. The button keeps toggling its own icon; only the score is capped at one.
+     * A like is one-shot per article: the policy scores it as +5 and has no unlike event, so a
+     * second tap would inflate the profile with a signal the reader never meant to give twice.
      *
-     * Reached from the UI thread only, which is why a plain set is enough.
+     * Held as Compose state, and held here rather than in the screen, for two reasons. A tap then
+     * invalidates the one button that changed instead of the whole pager, and a rotation no longer
+     * repaints every liked heart as unliked.
      */
-    private val likedIds: MutableSet<String> = mutableSetOf()
+    val likedIds: MutableState<Set<String>> = mutableStateOf(emptySet())
+
+    /** Articles that already produced an open. One-shot for the same reason as [likedIds]. */
     private val openedIds: MutableSet<String> = mutableSetOf()
 
     /**
@@ -158,9 +163,9 @@ class WikiscrollViewModel(
      * before the real one arrives.
      */
     fun onLike(articleId: String) {
-        if (articleId in likedIds) return
+        if (articleId in likedIds.value) return
         val recorded = recordEvent(articleId) { article -> LikeAction(article.id, article.categories) }
-        if (recorded) likedIds.add(articleId)
+        if (recorded) likedIds.value = likedIds.value + articleId
     }
 
     /**
@@ -215,16 +220,19 @@ class WikiscrollViewModel(
      * window, and a missing article must not crash the feed.
      */
     private fun recordEvent(articleId: String, event: (Article) -> InteractionEvent): Boolean {
-        val current = _uiState.value
-        val article = current.articles.firstOrNull { it.id == articleId } ?: return false
-
-        val interest = engine.processEvent(event(article), current.interest, nowEpochDay())
-        val reward = engine.checkReward(interest)
+        // Existence is checked outside the update because the article list is append only: an id
+        // that is missing here cannot appear inside it. The state itself is read inside the update,
+        // not before it, so a concurrent event cannot be scored against a stale profile and then
+        // overwritten.
+        if (_uiState.value.articles.none { article -> article.id == articleId }) return false
 
         _uiState.update { state ->
+            val article = state.articles.firstOrNull { candidate -> candidate.id == articleId }
+                ?: return@update state
+            val interest = engine.processEvent(event(article), state.interest, nowEpochDay())
             state.copy(
                 interest = interest,
-                pendingReward = reward ?: state.pendingReward,
+                pendingReward = engine.checkReward(interest) ?: state.pendingReward,
             )
         }
         return true

@@ -78,9 +78,10 @@ fun WikiscrollScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(pageCount = { uiState.articles.size })
     val uriHandler = LocalUriHandler.current
-    // Held as the state object rather than unpacked into a local value: the cards below read it
-    // through their own derived state, so a like invalidates one button instead of the whole pager.
-    val likedIds = remember { mutableStateOf(emptySet<String>()) }
+    // Owned by the view model, so a rotation keeps the hearts filled. Still passed down as the state
+    // object rather than an unpacked value: the cards read it through their own derived state, so
+    // one tap invalidates one button instead of the whole pager.
+    val likedIds = viewModel.likedIds
     var selectedArticle by remember { mutableStateOf<Article?>(null) }
 
     // The detail page is a branch of this composable, not a navigation entry, so nothing else can
@@ -92,14 +93,8 @@ fun WikiscrollScreen(
 
     // Hoisted out of the pager item so the callbacks keep one identity across recompositions. A
     // lambda rebuilt per item would be an unstable parameter and would stop the card from skipping.
-    val onLike: (String) -> Unit = remember(viewModel) {
-        { id ->
-            if (id !in likedIds.value) {
-                likedIds.value = likedIds.value + id
-                viewModel.onLike(id)
-            }
-        }
-    }
+    // De-duplication lives in the view model, which owns the ledger the score depends on.
+    val onLike: (String) -> Unit = remember(viewModel) { { id -> viewModel.onLike(id) } }
     val onOpenArticle: (Article) -> Unit = remember {
         { article -> selectedArticle = article }
     }
