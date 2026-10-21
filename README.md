@@ -37,14 +37,17 @@ This repository is an Apache-2.0 fork of [WikWok](https://github.com/terrakok/Wi
 
 ## Algorithm Architecture
 
-Three interaction events feed a persisted score per category. There is no other input.
+Four interaction events feed a persisted score per category.
 
-| Event | Condition | Weight |
-|---|---|---|
-| `DwellTime` | article visible for >= 8.0 s | **+2** |
-| `FastSwipe` | advanced in < 1.5 s | **-1** |
-| `LikeAction` | explicit tap | **+5**, confetti burst |
-| none | 1.5 s to 8.0 s | 0 - deliberate dead zone |
+| Event | Condition | Weight | Side effect |
+|---|---|---|---|
+| `DwellTime` | article visible for >= 8.0 s | **+2** | counts as a dwell |
+| `FastSwipe` | advanced in < 1.5 s | **-1** | buries the categories for 5 cards |
+| `LikeAction` | explicit tap | **+5**, confetti burst | counts as a dwell |
+| `ReadMore` | reader opens the full article | **+10** | counts as a dwell |
+| none | 1.5 s to 8.0 s | 0 - deliberate dead zone | - |
+
+A like costs a tap. Opening the article costs attention, and it is the only signal emitted after the reader has decided the summary was not enough, so it is worth twice a like. Both are idempotent per article: a second tap cannot inflate the profile, and an unknown article is never recorded.
 
 The timer starts when the pager settles on a page and stops on scroll-away, so prefetching cannot inflate it.
 
@@ -66,15 +69,46 @@ draw one uniform number per article
 
 Exploitation alone converges on the first three categories that ever scored and the feed collapses into a niche. The 30 % exploration arm exists to break that local maximum and to reset the response: a reward you can predict stops working as one. When the unseen pool empties, exploration falls back to cold categories (score > 0, no event in the last N articles) before degrading to pure exploitation. That exhaustion path is a test case, not an afterthought.
 
-### Random walk
+### Candidate selection
+
+Candidates are the internal links of the current article, minus the session history. Two gates run before any weighting, and both restore the ungated pool instead of returning nothing: an empty feed is a worse failure than a repeated topic.
 
 ```text
-candidates = internal links(current) + categories(current)
-weight(x)  = 1 + 0.5 * UserInterestScore(category(x))
-next       = weighted sample from candidates, excluding the session history
+gate 1  quality   drop extract.length < 300 or categories.size < 2
+gate 2  boredom   drop any candidate in a rejected category
 ```
 
-The walk is reversible, produces no repeats inside a session window, and only jumps globally on a dead end - an article with no usable links.
+The quality gate is the anti-stub rule. A three-word extract cannot tell the reader whether the topic is boring or the article is empty, and the topic takes the blame either way. Measured on the English most-viewed ranking the two limits remove about a fifth of the list, and what they remove is junk: calendar pages, list pages, unreleased films.
+
+### The weight
+
+```text
+weight(x) = affinity(x) * pathing(x) * authority(x)
+
+affinity(x)  = 1 + score(x) / (score(x) + 20)      -> 1.0 .. 2.0
+pathing(x)   = 2.5  if shared categories >= 2
+               0.5  if shared categories == 0
+               1.0  otherwise
+authority(x) = 2.0  if x is in the most viewed ranking, else 1.0
+```
+
+Affinity is normalised rather than linear so that a heavily liked topic cannot drown the other two signals: ten likes on one category would otherwise outrank every narrative edge on the board. Twenty points, four likes, is where the affinity term reaches 1.5.
+
+### Narrative pathing
+
+Two shared categories is a story the reader is already inside, and the feed follows it: World War II leads to Adolf Hitler leads to Nazi Germany. A candidate sharing nothing is a topic change and pays half price for it. This is the Substack mechanic: the next piece continues the one just finished instead of competing with it.
+
+### Authority
+
+Articles in the day's most-viewed ranking carry isPopular and are worth double. A landmark is a better next step than an obscure neighbour even when both match. The ranking is fetched once per language on the seed call and reused to annotate every related article afterwards, so a swipe still costs three requests.
+
+### Anti-boredom
+
+A fast swipe buries every category of that article for five cards, and each processed event decays the remaining turns by one. A candidate in a buried category is dropped, which forces the feed to change subject when the reader is visibly not reading.
+
+### The seed
+
+Cold start does not draw a random article. The first card is sampled uniformly from the most viewed ranking of the chosen language, which is why the feed opens on something people read today instead of a 1956 census district.
 
 ### Variable ratio rewards
 
@@ -91,15 +125,24 @@ Every tenth article draws from a weighted table. The interval is fixed; the outc
 ### Reference implementation
 
 ```kotlin
-fun next(current: Article, state: InterestState, rng: Random): Article {
-    val pool = if (rng.nextDouble() < 0.30) state.unseenCategories() else state.topCategories()
-    if (pool.isEmpty()) return current.neighbours().maxBy { state.score(it.category) }
+fun next(current: Article, candidates: List<Article>, state: InterestState, rng: Random): Article? {
+    val pool = candidates
+        .filterNot { it.id in state.sessionHistory }
+        .filter { it.extract.length >= 300 && it.categories.size >= 2 }
+        .filterNot { it.categories.any(state::isRejected) }
 
-    val target = pool.weightedSample(rng) { state.score(it) }
-    return current.neighbours()
-        .filter { it.category == target && it.id !in state.sessionHistory }
-        .maxByOrNull { state.score(it.category) }
-        ?: current.neighbours().random(rng)
+    return pool.weightedSampleOrNull(rng) { candidate ->
+        val shared = candidate.categories.count { it in current.categories }
+        val pathing = when {
+            shared >= 2 -> 2.5
+            shared == 0 -> 0.5
+            else -> 1.0
+        }
+        val authority = if (candidate.isPopular) 2.0 else 1.0
+        val score = state.matchScore(candidate.categories)
+        val affinity = 1.0 + score / (score + 20.0)
+        affinity * pathing * authority
+    }
 }
 ```
 
@@ -145,11 +188,11 @@ For iOS, open `iosApp/iosApp.xcodeproj` in Xcode and run the `iosApp` scheme. If
 Background research and the full task breakdown live in [docs/RESEARCH.md](docs/RESEARCH.md) and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
 
 - [x] **Phase 1 - Fork and identity.** Apache-2.0 fork, remotes wired, README and algorithm specification.
-- [ ] **Phase 2 - Recommendation engine.** `RecommendationEngine`, `InterestState`, 70/30 policy, interaction weights, random walk, streak and reward tables. Pure `commonTest` suite with a seeded RNG.
-- [ ] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article.
-- [ ] **Phase 4 - Persistence and polish.** Interest vector in KStore, cold-start bootstrap, offline cache, accessibility pass.
+- [x] **Phase 2 - Recommendation engine.** `RecommendationEngine`, `InterestState`, adaptive 70/30 policy, interaction weights, quality gate, narrative pathing, authority multiplier, anti-boredom penalties, streak and reward tables.
+- [x] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article, onboarding with interest seeding, most-viewed cold start.
+- [ ] **Phase 4 - Persistence and polish.** Interest vector in KStore, offline cache, accessibility pass.
 
-Contributions are welcome once Phase 2 lands, since the domain layer will then have a stable contract and a test suite to extend. Until then the useful work is discussion: open an issue with the mechanism you want to change and the evidence behind it.
+Contributions are welcome: the domain layer has a stable contract and 91 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.
 
 Two ground rules for pull requests. Every behavioural change needs a test that fails without it. Any change to the event weights or the payout table needs a short note in the pull request explaining the expected effect on reading time.
 
@@ -157,7 +200,7 @@ Two ground rules for pull requests. Every behavioural change needs a test that f
 
 Apache License 2.0. The upstream `LICENSE` is preserved verbatim; modifications are recorded in [NOTICE](NOTICE) as required by sections 4(b) and 4(d).
 
-Wikipedia content is served by the Wikimedia REST API under CC BY-SA 4.0. Every card carries the article title, its language and a link to the canonical page.
+Wikipedia content is served by the MediaWiki Action API under CC BY-SA 4.0. Every card carries the article title, its language and a link to the canonical page.
 
 Wikiscroll is not affiliated with or endorsed by the Wikimedia Foundation.
 

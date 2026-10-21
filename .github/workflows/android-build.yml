@@ -42,6 +42,9 @@ jobs:
       - name: Make the wrapper executable
         run: chmod +x gradlew
 
+      - name: Run unit tests
+        run: ./gradlew :sharedUI:jvmTest --no-daemon
+
       - name: Compile the shared module for the JVM and the web
         run: ./gradlew :sharedUI:compileKotlinJvm :sharedUI:compileKotlinWasmJs --no-daemon
 

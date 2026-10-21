@@ -3,6 +3,7 @@ package com.github.terrakok.wikwok.ui
 import com.github.terrakok.wikwok.data.WikipediaRepository
 import com.github.terrakok.wikwok.domain.Article
 import com.github.terrakok.wikwok.domain.InterestState
+import com.github.terrakok.wikwok.domain.RecommendationEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -150,14 +151,47 @@ class WikiscrollViewModelTest {
     @Test
     fun rewardIsEmittedEveryTenInteractions() = runTest(dispatcher.scheduler) {
         val viewModel = WikiscrollViewModel(FakeRepository())
-        val ids = viewModel.uiState.value.articles.map { it.id }
 
-        repeat(10) { index -> viewModel.onLike(ids[index % ids.size]) }
+        // Ten distinct cards, because an interaction is recorded once per article: repeating a
+        // like on the same card cannot stand in for ten reads.
+        viewModel.onSettled(8)
+        val ids = viewModel.uiState.value.articles.map { it.id }
+        assertTrue(ids.size >= 10, "the fixture must expose ten distinct cards, got " + ids.size)
+
+        repeat(10) { index -> viewModel.onLike(ids[index]) }
 
         assertTrue(viewModel.uiState.value.pendingReward != null, "a reward is owed at ten reads")
 
         viewModel.dismissReward()
         assertEquals(null, viewModel.uiState.value.pendingReward)
+    }
+
+    @Test
+    fun repeatedLikesOnOneArticleScoreOnce() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+        val id = viewModel.uiState.value.articles.first().id
+
+        repeat(5) { viewModel.onLike(id) }
+
+        assertEquals(
+            RecommendationEngine.SCORE_LIKE_POINTS,
+            viewModel.uiState.value.interest.scoreOf("Science"),
+            "a like is recorded once per article",
+        )
+    }
+
+    @Test
+    fun repeatedReadMoreOnOneArticleScoresOnce() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+        val id = viewModel.uiState.value.articles.first().id
+
+        repeat(5) { viewModel.onReadMore(id) }
+
+        assertEquals(
+            RecommendationEngine.SCORE_READ_MORE_POINTS,
+            viewModel.uiState.value.interest.scoreOf("Science"),
+            "opening the same article twice must not outscore a like",
+        )
     }
 
     @Test

@@ -138,9 +138,28 @@ class WikiscrollViewModel(
         recordEvent(articleId) { article -> FastSwipe(article.id, article.categories, durationMs) }
     }
 
-    /** Records an explicit like. */
+    /**
+     * Articles that already produced a like or an open.
+     *
+     * Both are one-shot per article. The policy scores a like as +5 and has no unlike event, so a
+     * second tap on the same card would inflate the profile with a signal the reader never meant
+     * to give twice. The button keeps toggling its own icon; only the score is capped at one.
+     *
+     * Reached from the UI thread only, which is why a plain set is enough.
+     */
+    private val likedIds: MutableSet<String> = mutableSetOf()
+    private val openedIds: MutableSet<String> = mutableSetOf()
+
+    /**
+     * Records an explicit like, once per article.
+     *
+     * An unknown article is not recorded, so a recycled page cannot consume the only allowed tap
+     * before the real one arrives.
+     */
     fun onLike(articleId: String) {
-        recordEvent(articleId) { article -> LikeAction(article.id, article.categories) }
+        if (articleId in likedIds) return
+        val recorded = recordEvent(articleId) { article -> LikeAction(article.id, article.categories) }
+        if (recorded) likedIds.add(articleId)
     }
 
     /**
@@ -148,9 +167,13 @@ class WikiscrollViewModel(
      *
      * Emitted before the browser opens: the process can be backgrounded by the deeplink, and an
      * event queued after that may never run.
+     *
+     * Once per article. At +10 a second open of the same card would outscore a like twice over.
      */
     fun onReadMore(articleId: String) {
-        recordEvent(articleId) { article -> ReadMore(article.id, article.categories) }
+        if (articleId in openedIds) return
+        val recorded = recordEvent(articleId) { article -> ReadMore(article.id, article.categories) }
+        if (recorded) openedIds.add(articleId)
     }
 
     /**
@@ -190,9 +213,9 @@ class WikiscrollViewModel(
      * An unknown [articleId] is ignored: the pager can report a page that was evicted from the
      * window, and a missing article must not crash the feed.
      */
-    private fun recordEvent(articleId: String, event: (Article) -> InteractionEvent) {
+    private fun recordEvent(articleId: String, event: (Article) -> InteractionEvent): Boolean {
         val current = _uiState.value
-        val article = current.articles.firstOrNull { it.id == articleId } ?: return
+        val article = current.articles.firstOrNull { it.id == articleId } ?: return false
 
         val interest = engine.processEvent(event(article), current.interest, nowEpochDay())
         val reward = engine.checkReward(interest)
@@ -203,6 +226,7 @@ class WikiscrollViewModel(
                 pendingReward = reward ?: state.pendingReward,
             )
         }
+        return true
     }
 
     /** Starts a refill if the buffer is low. Never blocks the caller. */
