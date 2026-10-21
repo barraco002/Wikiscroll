@@ -38,6 +38,9 @@ kotlin {
         commonMain.dependencies {
             api(libs.compose.runtime)
             api(libs.compose.ui)
+            // BackHandler lives in its own artifact. The ui POM aliases ui-backhandler but the
+            // classpath does not come through transitively for every target.
+            api(libs.compose.ui.backhandler)
             api(libs.compose.foundation)
             api(libs.compose.resources)
             api(libs.compose.ui.tooling.preview)
