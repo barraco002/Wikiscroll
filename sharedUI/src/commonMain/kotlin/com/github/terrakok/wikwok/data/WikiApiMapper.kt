@@ -10,7 +10,7 @@ import com.github.terrakok.wikwok.domain.Article
  *
  * @param language wiki language code, used to build the stable article identifier.
  * @param neighboursProvider edges for the random walk. Defaults to an empty graph, which is the
- * correct value when only the article itself was requested.
+ *   correct value when only the article itself was requested.
  * @return the article, or null when the page has no id.
  */
 fun WikiPage.toArticle(
@@ -21,9 +21,11 @@ fun WikiPage.toArticle(
     if (missing == true || invalid == true) return null
 
     return Article(
-        id = "$language:$pageId",
+        id = language + ":" + pageId,
         title = title,
         categories = categories.mapNotNull { it.cleanCategoryName() }.distinct(),
+        extract = extract.orEmpty().trim(),
+        imageUrl = thumbnail?.source?.trim()?.takeIf { it.isNotEmpty() },
         neighboursProvider = neighboursProvider,
     )
 }
