@@ -5,40 +5,28 @@ package com.github.terrakok.wikwok.data
  *
  * Kept as a small interface rather than a general key-value store: the app has exactly one flag
  * today, and a general store would invite the view model to persist derived state that the engine
- * already owns.
+ * already owns. The implementations are per platform; this contract is what the UI talks to.
  */
 interface SettingsStorage {
 
     /** True once the reader has chosen their interests and seen the feed. */
-    val isOnboardingCompleted: Boolean
-
-    /** Records that the onboarding was completed or restarted. */
-    fun setOnboardingCompleted(completed: Boolean)
+    var isOnboardingCompleted: Boolean
 }
 
 /**
- * Non-persistent [SettingsStorage].
+ * Keys shared by every platform implementation.
  *
- * The platform backends (SharedPreferences, NSUserDefaults, localStorage) each need an expect/actual
- * pair, and none of them can be exercised from the JVM harness this repository is verified with, so
- * this step ships the seam without the storage engine behind it.
- *
- * TODO(persistence): replace with an expect/actual implementation and delete this object. Nothing
- *  outside [App] knows which implementation is installed.
+ * Keeping them in one place means a rename cannot silently orphan a stored value on one platform
+ * while the others keep reading the old key.
  */
-object InMemorySettings : SettingsStorage {
+internal object SettingsKeys {
 
-    private var completed: Boolean = false
+    /** Preference key holding the onboarding flag. */
+    const val ONBOARDING_COMPLETED: String = "wikiscroll.onboarding.completed"
 
-    override val isOnboardingCompleted: Boolean
-        get() = completed
+    /** Android shared-preferences file name. */
+    const val FILE_NAME: String = "wikiscroll.settings"
 
-    override fun setOnboardingCompleted(completed: Boolean) {
-        this.completed = completed
-    }
-
-    /** Clears the flag. Exists so tests start from a known state despite the shared object. */
-    fun reset() {
-        completed = false
-    }
+    /** Desktop preferences node, following the reversed-domain convention of java.util.prefs. */
+    const val PREFERENCES_NODE: String = "com/github/terrakok/wikwok"
 }

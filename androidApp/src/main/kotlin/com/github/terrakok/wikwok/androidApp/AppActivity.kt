@@ -10,10 +10,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowInsetsControllerCompat
 import com.github.terrakok.wikwok.App
+import com.github.terrakok.wikwok.data.AppContextHolder
 
 class AppActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppContextHolder.init(applicationContext)
         enableEdgeToEdge()
 
         setContent {

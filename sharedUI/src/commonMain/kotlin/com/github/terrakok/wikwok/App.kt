@@ -12,7 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalPlatformContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.ImageLoader
-import com.github.terrakok.wikwok.data.InMemorySettings
+import com.github.terrakok.wikwok.data.PlatformSettingsStorage
+import com.github.terrakok.wikwok.data.SettingsStorage
 import com.github.terrakok.wikwok.data.WikipediaRepositoryImpl
 import com.github.terrakok.wikwok.theme.AppTheme
 import com.github.terrakok.wikwok.ui.OnboardingScreen
@@ -30,10 +31,11 @@ internal val LocalImageLoader = compositionLocalOf<ImageLoader> { error("ImageLo
 /**
  * Root of the application.
  *
- * Two destinations, chosen by whether the reader has stated what they want to read. The feed's state
- * holder is not built until the onboarding is done, which is the whole point of the gate: seeding a
- * profile that a first card was already chosen against would waste the seed. The nullable list is
- * the decision itself, so there is no second boolean to keep in sync with it.
+ * Two destinations, chosen by whether the reader has stated what they want to read. The answer is
+ * persisted by [PlatformSettingsStorage], so the onboarding runs once per install rather than once
+ * per launch. The feed's state holder is not built until the onboarding is done, which is the whole
+ * point of the gate: seeding a profile that a first card was already chosen against would waste the
+ * seed. The nullable list is the decision itself, so there is no second boolean to keep in sync.
  *
  * @param onThemeChanged invoked with the resolved dark-theme flag, wired by the platform entry point.
  */
@@ -44,8 +46,9 @@ fun App(
     val context = LocalPlatformContext.current
     val imageLoader = remember(context) { ImageLoader(context) }
     val repository = remember { WikipediaRepositoryImpl() }
+    val settings: SettingsStorage = remember { PlatformSettingsStorage() }
     var chosenTopics by remember {
-        mutableStateOf(if (InMemorySettings.isOnboardingCompleted) emptyList() else null)
+        mutableStateOf(if (settings.isOnboardingCompleted) emptyList() else null)
     }
 
     CompositionLocalProvider(LocalImageLoader provides imageLoader) {
@@ -53,7 +56,7 @@ fun App(
         if (topics == null) {
             OnboardingScreen(
                 onContinue = { selected ->
-                    InMemorySettings.setOnboardingCompleted(true)
+                    settings.isOnboardingCompleted = true
                     chosenTopics = selected
                 },
                 modifier = Modifier.fillMaxSize(),
