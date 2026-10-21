@@ -1,6 +1,21 @@
 package com.github.terrakok.wikwok.domain
 
 /**
+ * A single observation about how the last card landed.
+ *
+ * Only two outcomes matter to the policy: the reader stayed, or the reader left immediately. A
+ * medium stay carries no signal because it neither confirms nor rejects the topic.
+ */
+enum class ReadingSignal {
+
+    /** The reader stayed past the dwell threshold, or asked for the article explicitly. */
+    Dwell,
+
+    /** The reader moved on before the fast-swipe threshold. */
+    FastSwipe,
+}
+
+/**
  * Immutable snapshot of everything the engine knows about one reader.
  *
  * The state is a value: every mutation returns a new instance, which keeps the engine
@@ -13,6 +28,9 @@ package com.github.terrakok.wikwok.domain
  * @property seenCategories every category ever served, used by the exploration arm.
  * @property articlesRead number of cards served, drives the variable-ratio reward schedule.
  * @property streak consecutive-day reading streak.
+ * @property recentSignals the last [SIGNAL_WINDOW] outcomes, oldest first. Drives
+ * [explorationRate] and is deliberately separate from [sessionHistory]: the history answers what
+ * was shown, this answers how it went.
  */
 data class InterestState(
     val userInterestScores: Map<String, Int> = emptyMap(),
@@ -20,6 +38,7 @@ data class InterestState(
     val seenCategories: Set<String> = emptySet(),
     val articlesRead: Int = 0,
     val streak: Streak = Streak(),
+    val recentSignals: List<ReadingSignal> = emptyList(),
 ) {
 
     /** Current score for [category], or zero when the category was never seen. */
@@ -48,6 +67,39 @@ data class InterestState(
     /** True when the article was already served in this session and must not come back. */
     fun isInSession(articleId: String): Boolean = articleId in sessionHistory
 
+    /** Dwell events inside the current window. */
+    val recentDwells: Int get() = recentSignals.count { it == ReadingSignal.Dwell }
+
+    /** Fast swipes inside the current window. */
+    val recentFastSwipes: Int get() = recentSignals.count { it == ReadingSignal.FastSwipe }
+
+    /**
+     * Share of the next cards that should come from the exploration arm.
+     *
+     * The band is adaptive rather than fixed. A reader who is still reading is served what the
+     * profile says they like, up to [RecommendationEngine.MIN_EXPLORATION_RATE] exploration; a
+     * reader who is bouncing off everything is served novelty, up to
+     * [RecommendationEngine.MAX_EXPLORATION_RATE]. The neutral point is the documented 70/30 split,
+     * so an empty or balanced window reproduces the original policy exactly.
+     *
+     * Strain is measured against the full window rather than against the number of recorded
+     * signals. Otherwise a single unlucky swipe would swing the arm by 23 points, which is a policy
+     * change driven by noise. With the window as denominator, reaching either end of the band takes
+     * a consistent pattern.
+     */
+    val explorationRate: Double
+        get() {
+            if (recentSignals.isEmpty()) return RecommendationEngine.NEUTRAL_EXPLORATION_RATE
+            val strain = (recentFastSwipes - recentDwells).toDouble() / SIGNAL_WINDOW
+            return if (strain >= 0.0) {
+                RecommendationEngine.NEUTRAL_EXPLORATION_RATE +
+                    strain * (RecommendationEngine.MAX_EXPLORATION_RATE - RecommendationEngine.NEUTRAL_EXPLORATION_RATE)
+            } else {
+                RecommendationEngine.NEUTRAL_EXPLORATION_RATE +
+                    strain * (RecommendationEngine.NEUTRAL_EXPLORATION_RATE - RecommendationEngine.MIN_EXPLORATION_RATE)
+            }
+        }
+
     /**
      * Applies [delta] to every category in [categories], clamping individual scores at zero.
      *
@@ -61,6 +113,17 @@ data class InterestState(
             updated[category] = (scoreOf(category) + delta).coerceAtLeast(0)
         }
         return copy(userInterestScores = updated)
+    }
+
+    /**
+     * Appends [signal] to the window, dropping the oldest entry when it is full.
+     *
+     * A null signal leaves the state untouched, which is how a medium stay is expressed: the card
+     * still counts as served by [withServedArticle], but it says nothing about the reader.
+     */
+    internal fun withSignal(signal: ReadingSignal?): InterestState {
+        if (signal == null) return this
+        return copy(recentSignals = (recentSignals + signal).takeLast(SIGNAL_WINDOW))
     }
 
     /**
@@ -89,6 +152,9 @@ data class InterestState(
 
         /** Default size of [topCategories], matching a screen of prefetched cards. */
         const val DEFAULT_TOP_LIMIT: Int = 5
+
+        /** Number of recent outcomes the adaptive band looks at. */
+        const val SIGNAL_WINDOW: Int = 10
     }
 }
 

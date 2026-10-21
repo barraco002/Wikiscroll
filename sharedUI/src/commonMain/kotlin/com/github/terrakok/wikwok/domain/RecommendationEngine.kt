@@ -33,16 +33,26 @@ class RecommendationEngine(
      * Applies [event] to [currentState] and returns the updated snapshot.
      *
      * Scoring rules, matching the project README:
-     * - [InteractionEvent.DwellTime] with `durationMs >= 8000` adds [SCORE_DWELL_POINTS];
-     * - [InteractionEvent.FastSwipe] with `durationMs < 1500` subtracts [SCORE_FAST_SWIPE_POINTS];
-     * - [InteractionEvent.LikeAction] adds [SCORE_LIKE_POINTS].
+     * - [InteractionEvent.DwellTime] with a duration of at least [MIN_DWELL_MS] adds
+     *   [SCORE_DWELL_POINTS];
+     * - [InteractionEvent.DwellTime] below [FAST_SWIPE_MS] scores nothing: a short stay is a
+     *   rejection signal, but it is a different event from a reported swipe and is not punished
+     *   twice;
+     * - [InteractionEvent.FastSwipe] with a duration below [FAST_SWIPE_MS] subtracts
+     *   [SCORE_FAST_SWIPE_POINTS];
+     * - [InteractionEvent.LikeAction] adds [SCORE_LIKE_POINTS] and counts as a dwell.
      *
      * Out-of-range timings are not errors: they carry no scoring evidence, but the article is
      * still recorded as served so it cannot resurface later in the same session.
      *
+     * Every scored event also feeds [InterestState.recentSignals], which is what shifts the
+     * exploration band. An event that scores nothing contributes no signal either: a medium stay is
+     * silence, not a vote.
+     *
      * @param todayEpochDay current day as a Unix epoch day, supplied by the caller so the domain
      * layer stays free of clocks and time zones.
-     * @return a new state with scores, history, seen categories, read counter and streak updated.
+     * @return a new state with scores, history, seen categories, read counter, streak and signal
+     * window updated.
      */
     fun processEvent(
         event: InteractionEvent,
@@ -59,8 +69,22 @@ class RecommendationEngine(
             is InteractionEvent.LikeAction -> SCORE_LIKE_POINTS
         }
 
+        val signal = when (event) {
+            is InteractionEvent.DwellTime -> when {
+                event.durationMs >= MIN_DWELL_MS -> ReadingSignal.Dwell
+                event.durationMs < FAST_SWIPE_MS -> ReadingSignal.FastSwipe
+                else -> null
+            }
+
+            is InteractionEvent.FastSwipe ->
+                if (event.durationMs < FAST_SWIPE_MS) ReadingSignal.FastSwipe else null
+
+            is InteractionEvent.LikeAction -> ReadingSignal.Dwell
+        }
+
         return currentState
             .withScoreDelta(event.categories, delta)
+            .withSignal(signal)
             .withServedArticle(event.articleId, event.categories, todayEpochDay)
     }
 
@@ -72,9 +96,12 @@ class RecommendationEngine(
      * 1. **Session filter.** Articles already served are removed. If that removes everything, the
      * original list is used instead of returning null, because repeating a card is a smaller
      * failure than emptying the feed.
-     * 2. **Exploration (30%).** One roll decides the arm. On the exploration arm, candidates with
-     * at least one unexplored category are equally likely, which is the serendipity path.
-     * 3. **Exploitation (70%, and the exploration fallback).** Candidates whose categories appear in
+     * 2. **Exploration.** One roll decides the arm, against [InterestState.explorationRate]. That
+     * rate moves with the reader: a session where every card lands explores less than the neutral
+     * split, a session where every card is rejected explores more. On the exploration arm,
+     * candidates with at least one unexplored category are equally likely, which is the serendipity
+     * path.
+     * 3. **Exploitation (and the exploration fallback).** Candidates whose categories appear in
      * [InterestState.topCategories] are sampled proportionally to their strongest category score,
      * so a strong category dominates without monopolising the feed.
      *
@@ -88,7 +115,7 @@ class RecommendationEngine(
         val fresh = candidates.filterNot { currentState.isInSession(it.id) }
         val pool = fresh.ifEmpty { candidates }
 
-        val exploring = random.nextDouble() < EXPLORATION_RATE
+        val exploring = random.nextDouble() < currentState.explorationRate
 
         if (exploring) {
             val unexplored = pool.filter { candidate ->
@@ -165,8 +192,27 @@ class RecommendationEngine(
         /** Points added by an explicit like. */
         const val SCORE_LIKE_POINTS: Int = 5
 
-        /** Share of cards taken from the exploration arm. */
-        const val EXPLORATION_RATE: Double = 0.30
+        /** Exploration rate for a balanced or empty session window. */
+        const val NEUTRAL_EXPLORATION_RATE: Double = 0.30
+
+        /**
+         * Exploration rate at the bottom of the band, reached by a reader who keeps reading.
+         *
+         * The floor exists so the feed never becomes a pure echo chamber: even a perfectly
+         * satisfied reader is served novelty occasionally.
+         */
+        const val MIN_EXPLORATION_RATE: Double = 0.15
+
+        /**
+         * Exploration rate at the top of the band, reached by a reader who rejects everything.
+         *
+         * The ceiling exists so a bad streak cannot turn the feed into pure noise: most cards still
+         * follow the profile.
+         */
+        const val MAX_EXPLORATION_RATE: Double = 0.40
+
+        /** Documented neutral split, kept for callers that assume a fixed rate. */
+        const val EXPLORATION_RATE: Double = NEUTRAL_EXPLORATION_RATE
 
         /** Weight used for unexplored candidates, uniform by construction. */
         const val UNEXPLORED_WEIGHT: Double = 1.0
