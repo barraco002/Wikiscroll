@@ -36,14 +36,24 @@ class WikipediaException(message: String, cause: Throwable? = null) : Exception(
  * @param client HTTP client, injected so tests can supply a mock engine.
  * @param random source of the shuffle that picks neighbours. Injected so a test can pin the order.
  */
+/**
+ * Ceiling on cached articles. A card carries its summary text and up to five neighbours, so a few
+ * hundred entries is a few megabytes and a few thousand is an out-of-memory crash on a mid-range
+ * phone.
+ */
+private const val ARTICLE_CACHE_ENTRIES = 160
+
+/** Ceiling on cached neighbourhoods. Each entry holds up to five articles of its own. */
+private const val RELATED_CACHE_ENTRIES = 64
+
 class WikipediaRepositoryImpl(
     private val client: HttpClient = createWikiHttpClient(),
     private val random: Random = Random.Default,
 ) : WikipediaRepository {
 
-    private val articleCache: MutableMap<String, Article> = mutableMapOf()
+    private val articleCache: BoundedCache<String, Article> = BoundedCache(ARTICLE_CACHE_ENTRIES)
 
-    private val relatedCache: MutableMap<String, List<Article>> = mutableMapOf()
+    private val relatedCache: BoundedCache<String, List<Article>> = BoundedCache(RELATED_CACHE_ENTRIES)
 
     private val cacheMutex: Mutex = Mutex()
 
@@ -80,8 +90,8 @@ class WikipediaRepositoryImpl(
         val article = base.markedPopular(popular).withNeighbours { neighbours }
 
         cacheMutex.withLock {
-            articleCache[key] = article
-            articleCache[article.id] = article
+            articleCache.put(key, article)
+            articleCache.put(article.id, article)
         }
 
         article
@@ -179,8 +189,8 @@ s most viewed articles and attaches its neighbourhood.
         val related = if (sample.isEmpty()) emptyList() else fetchArticles(language, sample)
 
         cacheMutex.withLock {
-            relatedCache[key] = related
-            related.forEach { article -> articleCache[article.id] = article }
+            relatedCache.put(key, related)
+            related.forEach { article -> articleCache.put(article.id, article) }
         }
 
         return related
