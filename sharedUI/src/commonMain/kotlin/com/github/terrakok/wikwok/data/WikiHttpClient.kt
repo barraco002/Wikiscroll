@@ -3,6 +3,7 @@ package com.github.terrakok.wikwok.data
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
@@ -21,7 +22,7 @@ import kotlinx.serialization.json.Json
  * the transport contract rather than a nicety.
  */
 const val WIKISCROLL_USER_AGENT: String =
-    "Wikiscroll/1.0 (https://github.com/barraco002/Wikiscroll; contact@email.com)"
+    "Wikiscroll/1.4.0 (+https://github.com/barraco002/Wikiscroll)"
 
 /**
  * JSON configuration shared by every request.
@@ -73,6 +74,14 @@ fun HttpClientConfig<*>.configureWikiClient() {
         connectTimeoutMillis = 10_000
         socketTimeoutMillis = 20_000
         requestTimeoutMillis = 20_000
+    }
+
+    // A mobile network drops requests that a second attempt would have served. Server errors are
+    // the only ones retried: a 4xx is an answer, and retrying a timeout triples the time the reader
+    // spends looking at a spinner before the failure they were always going to get.
+    install(HttpRequestRetry) {
+        retryOnServerErrors(maxRetries = 2)
+        exponentialDelay(base = 2.0, maxDelayMs = 4_000)
     }
 
     defaultRequest {
