@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,19 +22,17 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -47,22 +44,30 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.github.terrakok.wikwok.LocalImageLoader
 import com.github.terrakok.wikwok.domain.Article
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * Full-screen card for one article.
+ * Full-bleed card for one article.
  *
- * The layout follows the feed convention the audience already knows: an image on the upper half, a
- * scrim under it, and the text anchored to the bottom with the primary action within thumb reach.
- * A missing thumbnail is not a degraded state; the gradient alone is a legitimate backdrop, so the
+ * The image owns the whole viewport, so the card reads as one continuous poster instead of a
+ * stacked layout with a photo on top and a text panel below. Everything else floats over it: the
+ * identity bar under the status bar, and the text block anchored to the bottom above the navigation
+ * bar. The scrim in between is what keeps white type legible over an arbitrary photograph, which is
+ * the only reliable way to do this without knowing the image's luminance.
+ *
+ * A missing thumbnail is not a degraded state. The gradient alone is a legitimate backdrop, so the
  * card falls back to a dark wash instead of a placeholder box.
  *
- * The like control animates on the frame the finger lands rather than waiting for the view model to
- * echo the state back. That difference is what makes the tap feel responsive: the scale pop and the
- * burst are local, the persistence is remote.
+ * The like control lives in the top bar rather than under the text: the whole surface is a swipe
+ * target, and a control sitting at the bottom edge competes with the swipe gesture that advances the
+ * feed.
  *
  * @param article content to render.
  * @param isLiked whether the article is already in the reader's likes.
@@ -81,22 +86,25 @@ fun ArticleCard(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(BackgroundTop, BackgroundBottom)
-                )
-            )
+            .background(Color.Black)
     ) {
+        // The fallback wash sits underneath the image, so an article without a thumbnail still gets
+        // a graded backdrop instead of a flat rectangle.
+        if (article.imageUrl == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(listOf(BackgroundTop, BackgroundBottom)))
+            )
+        }
+
         article.imageUrl?.let { url ->
             AsyncImage(
                 model = url,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 imageLoader = LocalImageLoader.current,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(ImageFraction)
-                    .align(Alignment.TopCenter),
+                modifier = Modifier.fillMaxSize(),
             )
         }
 
@@ -105,12 +113,19 @@ fun ArticleCard(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.38f to Color.Black.copy(alpha = 0.10f),
-                        0.62f to Color.Black.copy(alpha = 0.72f),
+                        0f to Color.Black.copy(alpha = TopScrimAlpha),
+                        0.30f to Color.Transparent,
+                        0.58f to Color.Black.copy(alpha = 0.55f),
                         1f to Color.Black,
                     )
                 )
+        )
+
+        TopBar(
+            languageTag = article.languageTag(),
+            isLiked = isLiked,
+            onLike = onLike,
+            modifier = Modifier.align(Alignment.TopCenter),
         )
 
         Column(
@@ -135,28 +150,83 @@ fun ArticleCard(
                 Text(
                     text = article.extract,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.78f),
-                    maxLines = 6,
+                    color = Color.White.copy(alpha = 0.80f),
+                    maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(modifier = Modifier.height(20.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(percent = 50))
+                    .clickable(role = Role.Button, onClick = onOpen)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                TextButton(
-                    onClick = onOpen,
-                    shape = RoundedCornerShape(percent = 50),
-                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = Color.White
-                    ),
-                ) {
-                    Text(text = "Read more", fontWeight = FontWeight.SemiBold)
-                }
-                LikeButton(isLiked = isLiked, onLike = onLike)
+                Text(
+                    text = "Read more",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
             }
+        }
+    }
+}
+
+/**
+ * Floating identity bar pinned under the status bar.
+ *
+ * The row only pads for the status bar, never for the navigation bar: it is anchored to the top by
+ * definition, and adding bottom insets here would push it back into the image for no reason.
+ */
+@Composable
+private fun TopBar(
+    languageTag: String,
+    isLiked: Boolean,
+    onLike: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Wikiscroll",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            letterSpacing = 0.4.sp,
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = PillAlpha), RoundedCornerShape(percent = 50))
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .size(34.dp)
+                    .background(Color.Black.copy(alpha = PillAlpha), RoundedCornerShape(percent = 50))
+                    .padding(9.dp)
+            ) {
+                drawStar(color = StarColor)
+            }
+            Text(
+                text = languageTag,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = PillAlpha), RoundedCornerShape(percent = 50))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            LikeButton(isLiked = isLiked, onLike = onLike)
         }
     }
 }
@@ -180,7 +250,7 @@ private fun LikeButton(
 
     Box(
         modifier = modifier
-            .size(56.dp)
+            .size(44.dp)
             .clickable(role = Role.Button, onClickLabel = "Like") {
                 onLike()
                 scope.launch {
@@ -213,7 +283,7 @@ private fun LikeButton(
         }
         Canvas(
             modifier = Modifier
-                .size(32.dp)
+                .size(26.dp)
                 .graphicsLayer {
                     scaleX = scale.value
                     scaleY = scale.value
@@ -248,8 +318,43 @@ private fun DrawScope.drawHeart(filled: Boolean, color: Color) {
     }
 }
 
-/** Fraction of the card height the lead image is allowed to occupy. */
-private const val ImageFraction = 0.5f
+/**
+ * Draws a five-pointed star inside the current canvas.
+ *
+ * The ten vertices alternate between an outer and an inner radius, starting at the top, which is
+ * what makes the shape symmetric without hard-coding coordinates.
+ */
+private fun DrawScope.drawStar(color: Color) {
+    val outer = size.minDimension * 0.46f
+    val inner = outer * 0.42f
+    val centerX = size.width / 2f
+    val centerY = size.height / 2f
+    val path = Path()
+    repeat(10) { index ->
+        val radius = if (index % 2 == 0) outer else inner
+        val angle = -PI / 2 + index * PI / 5
+        val x = centerX + (radius * cos(angle)).toFloat()
+        val y = centerY + (radius * sin(angle)).toFloat()
+        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    drawPath(path = path, color = color)
+}
+
+/**
+ * Edition tag shown in the top bar.
+ *
+ * The article id is formatted as language:pageId, so the edition travels with the model and no extra
+ * parameter has to be threaded through every composable in the feed.
+ */
+private fun Article.languageTag(): String =
+    id.substringBefore(':', missingDelimiterValue = "en").uppercase()
+
+/** Opacity of the pill backgrounds behind the top bar labels. */
+private const val PillAlpha = 0.35f
+
+/** Opacity of the dark wash at the very top, so the status bar icons stay readable. */
+private const val TopScrimAlpha = 0.45f
 
 /** Burst progress that marks the animation as over and the circle as invisible. */
 private const val BurstFinished = 1f
@@ -257,3 +362,4 @@ private const val BurstFinished = 1f
 private val BackgroundTop = Color(0xFF101018)
 private val BackgroundBottom = Color(0xFF1B1B24)
 private val LikedColor = Color(0xFFFF2D55)
+private val StarColor = Color(0xFFFFD166)
