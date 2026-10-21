@@ -142,6 +142,8 @@ For iOS, open `iosApp/iosApp.xcodeproj` in Xcode and run the `iosApp` scheme. If
 
 ## Roadmap and Contributing
 
+Background research and the full task breakdown live in [docs/RESEARCH.md](docs/RESEARCH.md) and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
 - [x] **Phase 1 - Fork and identity.** Apache-2.0 fork, remotes wired, README and algorithm specification.
 - [ ] **Phase 2 - Recommendation engine.** `RecommendationEngine`, `InterestState`, 70/30 policy, interaction weights, random walk, streak and reward tables. Pure `commonTest` suite with a seeded RNG.
 - [ ] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article.
