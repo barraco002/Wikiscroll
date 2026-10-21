@@ -29,6 +29,16 @@ data class Article(
     fun neighbours(): List<Article> = neighboursProvider()
 
     /**
+     * Returns a copy carrying [provider] as the neighbourhood.
+     *
+     * Used by the data layer to attach edges it has already resolved, so the engine never has to
+     * hit the network while a swipe is in flight. The provider stays lazy and is evaluated on each
+     * [neighbours] call.
+     */
+    fun withNeighbours(provider: () -> List<Article>): Article =
+        Article(id = id, title = title, categories = categories, neighboursProvider = provider)
+
+    /**
      * Hand-written because the generated version would recurse through [neighboursProvider] on a
      * cyclic graph.
      */
