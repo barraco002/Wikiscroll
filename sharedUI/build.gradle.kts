@@ -48,18 +48,12 @@ kotlin {
             implementation(libs.ktor.client.logging)
             implementation(libs.androidx.lifecycle.viewmodel)
             implementation(libs.androidx.lifecycle.runtime)
-            implementation(libs.compose.nav3)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinInject)
             implementation(libs.coil)
             implementation(libs.coil.network.ktor)
-            implementation(libs.multiplatformSettings)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.kstore)
-            implementation(libs.materialKolor)
             implementation(libs.kermit)
-            implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-            api(libs.filekit.core)
         }
 
         commonTest.dependencies {
@@ -72,24 +66,16 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
-            implementation(libs.kstore.file)
         }
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.ktor.client.okhttp)
-            implementation(libs.kstore.file)
-        }
-
-        webMain.dependencies {
-            implementation(libs.kstore.storage)
-            implementation(libs.navigation3.browser)
         }
 
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
-            implementation(libs.kstore.file)
         }
 
     }
