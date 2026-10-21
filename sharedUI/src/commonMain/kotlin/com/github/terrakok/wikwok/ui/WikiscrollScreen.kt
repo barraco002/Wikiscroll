@@ -37,7 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +69,7 @@ import com.github.terrakok.wikwok.domain.Reward
  * @param viewModel feed state holder.
  * @param modifier applied to the root box.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun WikiscrollScreen(
     viewModel: WikiscrollViewModel,
@@ -79,6 +82,13 @@ fun WikiscrollScreen(
     // through their own derived state, so a like invalidates one button instead of the whole pager.
     val likedIds = remember { mutableStateOf(emptySet<String>()) }
     var selectedArticle by remember { mutableStateOf<Article?>(null) }
+
+    // The detail page is a branch of this composable, not a navigation entry, so nothing else can
+    // pop it. Without this the Android back button finishes the activity: a reader who taps an
+    // article and presses back leaves the app instead of returning to the feed.
+    BackHandler(enabled = selectedArticle != null) {
+        selectedArticle = null
+    }
 
     // Hoisted out of the pager item so the callbacks keep one identity across recompositions. A
     // lambda rebuilt per item would be an unstable parameter and would stop the card from skipping.
@@ -135,7 +145,6 @@ fun WikiscrollScreen(
                 Box(modifier = Modifier.fillMaxSize()) {
                     when {
                         uiState.articles.isEmpty() && uiState.status == FeedStatus.Failed -> FailedState(
-                            message = uiState.errorMessage,
                             onRetry = viewModel::retry,
                         )
 
@@ -230,10 +239,7 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun FailedState(
-    message: String?,
-    onRetry: () -> Unit,
-) {
+private fun FailedState(onRetry: () -> Unit) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
@@ -250,7 +256,7 @@ private fun FailedState(
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = message ?: "Check your connection and try again.",
+                text = "Check your connection and try again.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,

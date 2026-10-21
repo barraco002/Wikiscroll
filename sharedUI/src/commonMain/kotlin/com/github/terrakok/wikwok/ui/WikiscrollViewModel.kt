@@ -43,8 +43,9 @@ enum class FeedStatus {
  * @property interest running profile fed by every interaction. Exposed so the UI can render the
  *   streak and the top categories without recomputing anything.
  * @property pendingReward reward owed to the user, cleared by [WikiscrollViewModel.dismissReward].
- * @property errorMessage last failure worth showing, or null. Stale failures are dropped when a
- *   later article loads, because a buffered feed should not carry a scare off-screen.
+ * @property errorMessage last failure recorded for diagnostics, or null. Stale failures are dropped
+ *   when a later article loads. The error card shows fixed copy instead: exception text such as
+ *   "java.net.UnknownHostException" is a log line, not a sentence to put in front of a reader.
  * @property settledIndex page the user is looking at, as reported by the pager.
  */
 data class WikiscrollUiState(
@@ -292,12 +293,15 @@ class WikiscrollViewModel(
      * a page that only links back to buffered articles from spinning forever.
      */
     private fun append(article: Article): Boolean {
-        var added = false
+        if (_uiState.value.articles.any { existing -> existing.id == article.id }) return false
+
         _uiState.update { state ->
+            // Re-checked inside the update. The lambda can receive a value that changed after the
+            // read above, and a duplicated card would give the pager two pages with one id, which
+            // breaks both the settled-page bookkeeping and the like guard.
             if (state.articles.any { existing -> existing.id == article.id }) {
                 state
             } else {
-                added = true
                 state.copy(
                     articles = state.articles + article,
                     status = FeedStatus.Ready,
@@ -305,7 +309,7 @@ class WikiscrollViewModel(
                 )
             }
         }
-        return added
+        return true
     }
 
     /**
