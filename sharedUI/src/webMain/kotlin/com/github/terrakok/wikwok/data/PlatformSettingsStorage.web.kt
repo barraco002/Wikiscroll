@@ -12,7 +12,7 @@ import kotlinx.browser.localStorage
  */
 actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
 
-    actual override var isOnboardingCompleted: Boolean
+    override var isOnboardingCompleted: Boolean
         get() = runCatching {
             localStorage.getItem(SettingsKeys.ONBOARDING_COMPLETED) == "true"
         }.getOrDefault(false)

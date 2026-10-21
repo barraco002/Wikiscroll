@@ -14,7 +14,7 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
     private val preferences: Preferences =
         Preferences.userRoot().node(SettingsKeys.PREFERENCES_NODE)
 
-    actual override var isOnboardingCompleted: Boolean
+    override var isOnboardingCompleted: Boolean
         get() = preferences.getBoolean(SettingsKeys.ONBOARDING_COMPLETED, false)
         set(value) {
             preferences.putBoolean(SettingsKeys.ONBOARDING_COMPLETED, value)

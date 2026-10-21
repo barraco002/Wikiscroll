@@ -9,7 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalPlatformContext
+import coil3.compose.LocalPlatformContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.ImageLoader
 import com.github.terrakok.wikwok.data.PlatformSettingsStorage
@@ -48,7 +48,7 @@ fun App(
     val repository = remember { WikipediaRepositoryImpl() }
     val settings: SettingsStorage = remember { PlatformSettingsStorage() }
     var chosenTopics by remember {
-        mutableStateOf(if (settings.isOnboardingCompleted) emptyList() else null)
+        mutableStateOf<List<String>?>(if (settings.isOnboardingCompleted) emptyList() else null)
     }
 
     CompositionLocalProvider(LocalImageLoader provides imageLoader) {

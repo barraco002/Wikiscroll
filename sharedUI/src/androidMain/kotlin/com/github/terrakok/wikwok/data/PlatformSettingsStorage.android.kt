@@ -36,7 +36,7 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
     private val preferences: SharedPreferences = AppContextHolder.requireContext()
         .getSharedPreferences(SettingsKeys.FILE_NAME, Context.MODE_PRIVATE)
 
-    actual override var isOnboardingCompleted: Boolean
+    override var isOnboardingCompleted: Boolean
         get() = preferences.getBoolean(SettingsKeys.ONBOARDING_COMPLETED, false)
         set(value) {
             preferences.edit().putBoolean(SettingsKeys.ONBOARDING_COMPLETED, value).apply()

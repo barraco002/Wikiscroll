@@ -12,7 +12,7 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
 
     private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
-    actual override var isOnboardingCompleted: Boolean
+    override var isOnboardingCompleted: Boolean
         get() = defaults.boolForKey(SettingsKeys.ONBOARDING_COMPLETED)
         set(value) {
             defaults.setBool(value, forKey = SettingsKeys.ONBOARDING_COMPLETED)
