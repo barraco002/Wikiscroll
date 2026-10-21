@@ -132,7 +132,7 @@ else:
 utility(c) = max(0, score(c)) + 2.0 * betaSample(alpha_c, beta_c)
 category = pool.weightedSample(rng) { utility(it) }
 
-candidates = current.links ∪ current.categories
+candidates = current.links + current.categories
 candidates = candidates.filter { it !in sessionHistory }
 ranked = candidates.map { RankedArticle(it, walkWeight(it) * diversityPenalty(it)) }
 next = ranked.weightedSample(rng) { it.weight } ?: deadEndFallback(current, state)
