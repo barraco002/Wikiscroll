@@ -20,7 +20,7 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "WikWok"
+            packageName = "Wikiscroll"
             packageVersion = "1.0.5"
 
             linux {

@@ -2,6 +2,7 @@ package com.github.terrakok.wikwok.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -57,6 +59,56 @@ import androidx.compose.ui.unit.dp
  * @param onContinue invoked with the chosen topics, presets and free text merged.
  * @param modifier applied to the root column.
  */
+/**
+ * Mark shown above the onboarding headline.
+ *
+ * Drawn instead of shipped as a bitmap: it follows the theme colour, stays sharp at any density
+ * and adds nothing to the APK. An open book is the one shape that says "reading" without a
+ * caption, and it survives at 64 dp where a detailed logo would turn to mush.
+ */
+@Composable
+private fun BookMark(modifier: Modifier = Modifier) {
+    val pageColor = MaterialTheme.colorScheme.primary
+    val lineColor = MaterialTheme.colorScheme.background
+    Canvas(modifier = modifier.size(64.dp)) {
+        val w = size.width
+        val h = size.height
+        val lineWidth = h * 0.035f
+
+        // Each page tilts up towards the spine, which is what makes the two shapes read as one
+        // open book instead of two separate rectangles.
+        fun drawPage(inner: Float, outer: Float) {
+            val path = Path().apply {
+                moveTo(w * inner, h * 0.30f)
+                lineTo(w * outer, h * 0.38f)
+                lineTo(w * outer, h * 0.74f)
+                lineTo(w * inner, h * 0.66f)
+                close()
+            }
+            drawPath(path = path, color = pageColor)
+        }
+
+        drawPage(inner = 0.46f, outer = 0.06f)
+        drawPage(inner = 0.54f, outer = 0.94f)
+
+        for (row in 0..1) {
+            val y = h * (0.45f + row * 0.12f)
+            drawLine(
+                color = lineColor,
+                start = Offset(w * 0.13f, y),
+                end = Offset(w * 0.40f, y - h * 0.035f),
+                strokeWidth = lineWidth
+            )
+            drawLine(
+                color = lineColor,
+                start = Offset(w * 0.60f, y - h * 0.035f),
+                end = Offset(w * 0.87f, y),
+                strokeWidth = lineWidth
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnboardingScreen(
@@ -85,6 +137,8 @@ fun OnboardingScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 32.dp)
     ) {
+        BookMark(modifier = Modifier.align(Alignment.CenterHorizontally))
+        Spacer(modifier = Modifier.height(20.dp))
         Text(
             text = "Choose your interests",
             style = MaterialTheme.typography.headlineLarge,

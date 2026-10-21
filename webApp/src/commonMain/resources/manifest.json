@@ -1,6 +1,6 @@
 {
-  "name": "WikWok",
-  "short_name": "WikWok",
+  "name": "Wikiscroll",
+  "short_name": "Wikiscroll",
   "icons": [
     {
       "src": "./android-chrome-192x192.png",

@@ -7,7 +7,7 @@ import com.github.terrakok.wikwok.App
 
 fun main() = application {
     Window(
-        title = "WikWok",
+        title = "Wikiscroll",
         state = rememberWindowState(width = 800.dp, height = 600.dp),
         onCloseRequest = ::exitApplication,
     ) {

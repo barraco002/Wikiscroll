@@ -1,4 +1,4 @@
-rootProject.name = "WikWok"
+rootProject.name = "Wikiscroll"
 
 pluginManagement {
     repositories {

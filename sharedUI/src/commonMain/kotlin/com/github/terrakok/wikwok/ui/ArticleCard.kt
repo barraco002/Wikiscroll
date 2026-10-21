@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -106,11 +107,26 @@ fun ArticleCard(
         // The fallback wash sits underneath the image, so an article without a thumbnail still gets
         // a graded backdrop instead of a flat rectangle.
         if (article.imageUrl == null) {
+            // A missing lead image is the common case, not the exception, and a flat black
+            // rectangle reads as a failed load. The title decides a stable gradient, so the same
+            // article always looks the same and two imageless cards in a row never look like the
+            // same broken screen. The initial gives the eye something to land on before the
+            // headline, which is still the only text the reader is meant to read.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(BackgroundTop, BackgroundBottom)))
-            )
+                    .background(Brush.linearGradient(article.title.fallbackGradient()))
+            ) {
+                Text(
+                    text = article.title.fallbackInitial(),
+                    color = Color.White.copy(alpha = FallbackInitialAlpha),
+                    fontSize = FallbackInitialSize,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
         }
 
         article.imageUrl?.let { url ->
@@ -377,6 +393,49 @@ private const val TopScrimAlpha = 0.45f
 
 /** Burst progress that marks the animation as over and the circle as invisible. */
 private const val BurstFinished = 1f
+
+/**
+ * Number of hues the fallback gradient can land on.
+ *
+ * Kept at the full wheel instead of a curated list: the value and saturation are what keep the
+ * result dark enough for white text, so every hue is usable and adjacent articles rarely collide.
+ */
+private const val HueCount = 360
+
+/** Gap between the two gradient stops, so the backdrop never reads as one flat colour. */
+private const val HueShift = 42
+
+/** Opacity of the watermark initial. Loud enough to identify the card, quiet enough to ignore. */
+private const val FallbackInitialAlpha = 0.22f
+
+/** Size of the watermark initial: one glyph tall enough to own the card. */
+private val FallbackInitialSize = 240.sp
+
+/**
+ * Two-stop gradient derived from the title.
+ *
+ * [String.hashCode] is specified by the Kotlin standard library, so the colour of an article is
+ * stable across launches, restarts and platforms for the same title. Saturation and value stay low
+ * so the white headline over the scrim keeps its contrast on every hue.
+ */
+private fun String.fallbackGradient(): List<Color> {
+    val hue = ((hashCode() % HueCount) + HueCount) % HueCount
+    return listOf(
+        Color.hsv(hue.toFloat(), 0.55f, 0.34f),
+        Color.hsv(((hue + HueShift) % HueCount).toFloat(), 0.85f, 0.09f)
+    )
+}
+
+/**
+ * First letter of the title, shown as the watermark on a card without a thumbnail.
+ *
+ * Titles that open with punctuation or a digit still get a glyph instead of an empty box, because
+ * an empty watermark is worse than none at all.
+ */
+private fun String.fallbackInitial(): String =
+    firstOrNull { it.isLetter() }?.uppercaseChar()?.toString()
+        ?: firstOrNull()?.toString()
+        ?: "?"
 
 private val BackgroundTop = Color(0xFF101018)
 private val BackgroundBottom = Color(0xFF1B1B24)
