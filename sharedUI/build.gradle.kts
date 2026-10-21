@@ -16,7 +16,10 @@ plugins {
 kotlin {
     android {
         namespace = "com.github.terrakok.wikwok"
-        compileSdk = 36
+        // Must stay at or above the level the Compose artifacts are built against. material3 and
+        // compose-animation ship AAR metadata demanding API 37, so a library compiled against 36
+        // fails the consumer's metadata check before a single class is bundled.
+        compileSdk = 37
         minSdk = 23
         androidResources.enable = true
         compilerOptions { jvmTarget = JvmTarget.JVM_17 }
