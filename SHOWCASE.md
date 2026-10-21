@@ -40,7 +40,7 @@ feed that stops surprising you after twenty cards.
 - **CI/CD on GitHub Actions.** Every push runs the unit tests, compiles the shared module for JVM and
   wasmJs, assembles the release APK and uploads it as an artifact. Every `v*` tag publishes a GitHub
   Release with the APK attached.
-- **97 unit tests.** Seeded and deterministic: the engine takes its randomness from an injected seed, so
+- **101 unit tests.** Seeded and deterministic: the engine takes its randomness from an injected seed, so
   a probabilistic assertion either always passes or always fails, and flakiness stays a bug instead of
   becoming background noise.
 - **Kotlin Multiplatform, four targets.** Android, desktop JVM, web (wasmJs) and iOS (arm64 and
@@ -49,6 +49,15 @@ feed that stops surprising you after twenty cards.
 - **A launcher icon that survives every API level.** Vector adaptive icon on 26 and up, a radial
   gradient on 24 and 25, a flat fallback on 23, a monochrome layer for the Android 13 themed icon, and
   bitmaps rendered from the same geometry for the launchers that still refuse vectors.
+- **Bounded memory in an unbounded feed.** The article and related-article caches are LRU maps capped
+  at 160 and 64 entries and evicted in access order, so a session that runs for an hour holds the same
+  footprint as one that runs for a minute. An unbounded map behind a feed with no last page is an
+  out-of-memory error waiting for a timer.
+- **Retries that still fail fast.** The HTTP client retries server errors twice with exponential
+  backoff and never retries a timeout, so a dead connection surfaces in seconds instead of tripling the
+  spinner. Back closes the article before it closes the app: the detail view is a branch of the feed
+  composable rather than a navigation entry, so it needs an explicit handler, and predictive back is
+  enabled in the manifest.
 - **Category-aware empty states.** An article with no lead image is not left on a flat black card: the
   backdrop is a vertical gradient picked from the article categories by whole-word match, so `Software`
   never inherits the war palette just because it contains the letters `war`.
@@ -57,12 +66,12 @@ feed that stops surprising you after twenty cards.
 
 Download the APK from the latest release:
 
-https://github.com/barraco002/Wikiscroll/releases/tag/v1.3.0
+https://github.com/barraco002/Wikiscroll/releases/tag/v1.4.0
 
 Install it on any device running Android 6.0 (API 23) or newer:
 
 ```bash
-adb install -r wikiscroll-1.3.0.apk
+adb install -r wikiscroll-1.4.0.apk
 ```
 
 Or copy the file to the device and open it, allowing installation from unknown sources when prompted.
