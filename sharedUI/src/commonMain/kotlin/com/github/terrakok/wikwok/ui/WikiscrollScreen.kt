@@ -1,10 +1,14 @@
 package com.github.terrakok.wikwok.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,15 +44,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.github.terrakok.wikwok.domain.Reward
 import com.github.terrakok.wikwok.domain.Article
+import com.github.terrakok.wikwok.domain.Reward
 
 /**
- * The feed: one article per page, swiped vertically.
+ * The feed and the article detail, as one screen with two destinations.
  *
  * The pager owns the scroll position and the screen only reacts to it, so the view model never
  * fights the gesture. Two observations feed the engine: the settled page, which tells the buffering
  * logic how far ahead it is, and the dwell tracker, which reports reading time.
+ *
+ * The detail page is a second destination held in composition state rather than a navigation graph
+ * entry. There is one route and one back gesture, so a graph would add a dependency and a lifecycle
+ * to model a boolean. The pager state lives outside [AnimatedContent], which is what makes returning
+ * to the feed land on the same card instead of the first one.
  *
  * Likes are tracked locally because they are a presentation concern here: the engine only needs to
  * know that the event happened, and it does not echo a per-article flag back. Re-tapping an already
@@ -67,6 +76,7 @@ fun WikiscrollScreen(
     val pagerState = rememberPagerState(pageCount = { uiState.articles.size })
     val uriHandler = LocalUriHandler.current
     var likedIds by remember { mutableStateOf(emptySet<String>()) }
+    var selectedArticle by remember { mutableStateOf<Article?>(null) }
 
     LaunchedEffect(viewModel) {
         viewModel.start()
@@ -83,6 +93,7 @@ fun WikiscrollScreen(
         articles = uiState.articles,
         onDwell = viewModel::onDwellTime,
         onFastSwipe = viewModel::onFastSwipe,
+        active = selectedArticle == null,
     )
 
     Box(
@@ -90,47 +101,73 @@ fun WikiscrollScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        when {
-            uiState.articles.isEmpty() && uiState.status == FeedStatus.Failed -> FailedState(
-                message = uiState.errorMessage,
-                onRetry = viewModel::retry,
-            )
-
-            uiState.articles.isEmpty() -> LoadingState()
-
-            else -> VerticalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                beyondViewportPageCount = 1,
-            ) { index ->
-                val article = uiState.articles.getOrNull(index)
-                if (article == null) {
-                    Box(modifier = Modifier.fillMaxSize())
+        AnimatedContent(
+            targetState = selectedArticle,
+            contentKey = { it?.id },
+            transitionSpec = {
+                if (targetState != null) {
+                    (slideInVertically(initialOffsetY = { it / 6 }) + fadeIn()) togetherWith fadeOut()
                 } else {
-                    ArticleCard(
-                        article = article,
-                        isLiked = article.id in likedIds,
-                        onLike = {
-                            if (article.id !in likedIds) {
-                                likedIds = likedIds + article.id
-                                viewModel.onLike(article.id)
+                    (fadeIn() + scaleIn(initialScale = 0.97f)) togetherWith
+                        (slideOutVertically(targetOffsetY = { it / 6 }) + fadeOut())
+                }
+            },
+            label = "feedToDetail",
+            modifier = Modifier.fillMaxSize(),
+        ) { article ->
+            if (article == null) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when {
+                        uiState.articles.isEmpty() && uiState.status == FeedStatus.Failed -> FailedState(
+                            message = uiState.errorMessage,
+                            onRetry = viewModel::retry,
+                        )
+
+                        uiState.articles.isEmpty() -> LoadingState()
+
+                        else -> VerticalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            beyondViewportPageCount = 1,
+                        ) { index ->
+                            val current = uiState.articles.getOrNull(index)
+                            if (current == null) {
+                                Box(modifier = Modifier.fillMaxSize())
+                            } else {
+                                ArticleCard(
+                                    article = current,
+                                    isLiked = current.id in likedIds,
+                                    onLike = {
+                                        if (current.id !in likedIds) {
+                                            likedIds = likedIds + current.id
+                                            viewModel.onLike(current.id)
+                                        }
+                                    },
+                                    onOpen = { selectedArticle = current },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
-                        },
-                        onOpen = { uriHandler.openUri(article.canonicalUrl()) },
-                        modifier = Modifier.fillMaxSize(),
+                        }
+                    }
+
+                    RewardBanner(
+                        reward = uiState.pendingReward,
+                        onDismiss = viewModel::dismissReward,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(top = 12.dp),
                     )
                 }
+            } else {
+                ArticleDetailScreen(
+                    article = article,
+                    onBack = { selectedArticle = null },
+                    onOpenArticle = { uriHandler.openUri(article.canonicalUrl()) },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
-
-        RewardBanner(
-            reward = uiState.pendingReward,
-            onDismiss = viewModel::dismissReward,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 12.dp),
-        )
     }
 }
 
@@ -229,7 +266,7 @@ private fun rewardLabel(reward: Reward): String = when (reward) {
  * The identifier carries the language prefix, which is the only place the edition is known, so the
  * URL is built from it rather than from an extra field.
  */
-private fun Article.canonicalUrl(): String {
+internal fun Article.canonicalUrl(): String {
     val language = id.substringBefore(':', missingDelimiterValue = "en")
     return "https://" + language + ".wikipedia.org/wiki/" + title.replace(' ', '_')
 }

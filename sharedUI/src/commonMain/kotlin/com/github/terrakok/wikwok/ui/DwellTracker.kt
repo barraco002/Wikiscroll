@@ -33,6 +33,9 @@ import kotlin.time.Clock
  *   to the buffer does not restart the effect.
  * @param onDwell called with the article id and the duration in milliseconds.
  * @param onFastSwipe called with the article id and the duration in milliseconds.
+ * @param active false while the feed is covered by another screen. Covering the feed closes the
+ *   open measurement, otherwise the time spent reading the detail page would be charged to the
+ *   article underneath it.
  */
 @Composable
 fun DwellTrackerEffect(
@@ -40,6 +43,7 @@ fun DwellTrackerEffect(
     articles: List<Article>,
     onDwell: (articleId: String, durationMs: Long) -> Unit,
     onFastSwipe: (articleId: String, durationMs: Long) -> Unit,
+    active: Boolean = true,
 ) {
     val session = remember { DwellSession { Clock.System.now().toEpochMilliseconds() } }
     val currentArticles by rememberUpdatedState(articles)
@@ -54,7 +58,11 @@ fun DwellTrackerEffect(
         }
     }
 
-    LaunchedEffect(pagerState, session) {
+    LaunchedEffect(pagerState, session, active) {
+        if (!active) {
+            dispatch(session.leave())
+            return@LaunchedEffect
+        }
         snapshotFlow { pagerState.isScrollInProgress to pagerState.settledPage }
             .collect { (scrolling, settledPage) ->
                 if (scrolling) {
