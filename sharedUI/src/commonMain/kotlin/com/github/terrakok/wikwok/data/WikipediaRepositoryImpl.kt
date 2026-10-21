@@ -7,6 +7,7 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.random.Random
@@ -18,6 +19,29 @@ import kotlin.random.Random
  * failure the same way or inspect the message, and no platform exception leaks through.
  */
 class WikipediaException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Ceiling on cached articles. A card carries its summary text and up to five neighbours, so a few
+ * hundred entries is a few megabytes and a few thousand is an out-of-memory crash on a mid-range
+ * phone.
+ */
+private const val ARTICLE_CACHE_ENTRIES = 160
+
+/** Ceiling on cached neighbourhoods. Each entry holds up to five articles of its own. */
+private const val RELATED_CACHE_ENTRIES = 64
+
+/**
+ * [runCatching] that lets cancellation through.
+ *
+ * A coroutine cancelled while a request is in flight throws [CancellationException], and
+ * [runCatching] turns that into a failed [Result]. The caller then treats an abandoned request as an
+ * ordinary error: it reports the failure and keeps writing to a scope that no longer exists.
+ * Cancellation is control flow rather than a fault, so it is rethrown untouched.
+ */
+internal inline fun <T> catchingCancellation(block: () -> T): Result<T> =
+    runCatching(block).onFailure { cause ->
+        if (cause is CancellationException) throw cause
+    }
 
 /**
  * [WikipediaRepository] backed by the MediaWiki Action API.
@@ -36,16 +60,6 @@ class WikipediaException(message: String, cause: Throwable? = null) : Exception(
  * @param client HTTP client, injected so tests can supply a mock engine.
  * @param random source of the shuffle that picks neighbours. Injected so a test can pin the order.
  */
-/**
- * Ceiling on cached articles. A card carries its summary text and up to five neighbours, so a few
- * hundred entries is a few megabytes and a few thousand is an out-of-memory crash on a mid-range
- * phone.
- */
-private const val ARTICLE_CACHE_ENTRIES = 160
-
-/** Ceiling on cached neighbourhoods. Each entry holds up to five articles of its own. */
-private const val RELATED_CACHE_ENTRIES = 64
-
 class WikipediaRepositoryImpl(
     private val client: HttpClient = createWikiHttpClient(),
     private val random: Random = Random.Default,
@@ -72,9 +86,9 @@ class WikipediaRepositoryImpl(
      * Neighbour resolution is best effort. A feed entry with no edges is still readable, so a
      * failure on the second or third request degrades the graph instead of failing the article.
      */
-    override suspend fun getArticle(language: String, id: String): Result<Article> = runCatching {
+    override suspend fun getArticle(language: String, id: String): Result<Article> = catchingCancellation {
         val key = cacheKey(language, id)
-        cacheMutex.withLock { articleCache[key] }?.let { cached -> return@runCatching cached }
+        cacheMutex.withLock { articleCache[key] }?.let { cached -> return@catchingCancellation cached }
 
         val page = requestPages(language, id).firstPage()
             ?: throw WikipediaException(describeMissing(id))
@@ -84,7 +98,7 @@ class WikipediaRepositoryImpl(
         // Read-only lookup. Fetching the ranking belongs to the seed call, never to a card load:
         // a swipe costs three requests and this is not allowed to make it four.
         val popular = cachedPopularTitlesOrEmpty(language)
-        val neighbours = runCatching { relatedOf(language, base.id) }
+        val neighbours = catchingCancellation { relatedOf(language, base.id) }
             .getOrDefault(emptyList())
             .map { neighbour -> neighbour.markedPopular(popular) }
         val article = base.markedPopular(popular).withNeighbours { neighbours }
@@ -98,12 +112,10 @@ class WikipediaRepositoryImpl(
     }
 
     override suspend fun getRelatedArticles(language: String, currentArticleId: String): Result<List<Article>> =
-        runCatching { relatedOf(language, currentArticleId) }
+        catchingCancellation { relatedOf(language, currentArticleId) }
 
     /**
-     * Loads one of the day
-'
-s most viewed articles and attaches its neighbourhood.
+     * Loads one of the day's most viewed articles and attaches its neighbourhood.
      *
      * This is the seed for a cold start and the way out of a dead end, so the candidate comes
      * from the most viewed ranking instead of a uniform random draw. A uniform draw over a whole
@@ -113,9 +125,29 @@ s most viewed articles and attaches its neighbourhood.
      * The second step is a plain [getArticle] call, so the article arrives with its
      * neighbourhood and shares the cache with every other path into the feed.
      */
-    override suspend fun getPopularArticle(language: String): Result<Article> = runCatching {
+    override suspend fun getPopularArticle(language: String): Result<Article> = catchingCancellation {
         val title = cachedPopularTitles(language).random(random)
         getArticle(language, title).getOrThrow()
+    }
+
+    /** The already resolved ranking for [language], or an empty list when none was fetched yet. */
+    private suspend fun cachedPopularTitlesOrEmpty(language: String): List<String> =
+        cacheMutex.withLock { popularTitleCache[language] }.orEmpty()
+
+    /**
+     * The ranked titles for [language], computed once per session.
+     *
+     * The ranking feeds two call sites, and each of them runs on every swipe, so the network cost
+     * of the list belongs to the first call and not to the hundredth. A failure is not cached:
+     * the next swipe is allowed to retry.
+     */
+    private suspend fun cachedPopularTitles(language: String): List<String> {
+        cacheMutex.withLock { popularTitleCache[language] }?.let { cached -> return cached }
+
+        val titles = popularTitles(language)
+
+        cacheMutex.withLock { popularTitleCache[language] = titles }
+        return titles
     }
 
     /**
@@ -128,26 +160,6 @@ s most viewed articles and attaches its neighbourhood.
      *
      * @throws WikipediaException when the ranking is empty or the request failed.
      */
-    /**
-     * The ranked titles for [language], computed once per session.
-     *
-     * The ranking feeds two call sites, and each of them runs on every swipe, so the network cost
-     * of the list belongs to the first call and not to the hundredth. A failure is not cached:
-     * the next swipe is allowed to retry.
-     */
-    /** The already resolved ranking for [language], or an empty list when none was fetched yet. */
-    private suspend fun cachedPopularTitlesOrEmpty(language: String): List<String> =
-        cacheMutex.withLock { popularTitleCache[language] }.orEmpty()
-
-    private suspend fun cachedPopularTitles(language: String): List<String> {
-        cacheMutex.withLock { popularTitleCache[language] }?.let { cached -> return cached }
-
-        val titles = popularTitles(language)
-
-        cacheMutex.withLock { popularTitleCache[language] = titles }
-        return titles
-    }
-
     private suspend fun popularTitles(language: String): List<String> {
         val response = queryPages(language) {
             parameter("action", "query")
