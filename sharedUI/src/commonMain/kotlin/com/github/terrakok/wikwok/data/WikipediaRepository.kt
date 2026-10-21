@@ -35,6 +35,17 @@ interface WikipediaRepository {
      */
     suspend fun getRelatedArticles(language: String, currentArticleId: String): Result<List<Article>>
 
+    /**
+     * Loads an arbitrary article from the language edition.
+     *
+     * Used once, to seed the feed when there is no reading history to walk from. The result is a
+     * complete article with its neighbourhood already attached, exactly like [getArticle].
+     *
+     * @param language wiki language code.
+     * @return the article on success, or a failure when the request could not be completed.
+     */
+    suspend fun getRandomArticle(language: String): Result<Article>
+
     companion object {
         /** Upper bound on how many links are expanded into articles per call. */
         const val MAX_RELATED_ARTICLES: Int = 5

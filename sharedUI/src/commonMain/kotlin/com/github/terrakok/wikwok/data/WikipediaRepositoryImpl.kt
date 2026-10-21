@@ -77,6 +77,34 @@ class WikipediaRepositoryImpl(
         runCatching { relatedOf(language, currentArticleId) }
 
     /**
+     * Seeds the feed with an arbitrary article.
+     *
+     * A single request: the random generator feeds the same property set the feed renders, so the
+     * article and its metadata arrive together. The neighbourhood is resolved afterwards, exactly
+     * as in [getArticle], because the engine needs edges before the first swipe.
+     */
+    override suspend fun getRandomArticle(language: String): Result<Article> = runCatching {
+        val page = queryPages(language) {
+            parameter("action", "query")
+            parameter("format", "json")
+            parameter("formatversion", 2)
+            parameter("generator", "random")
+            parameter("grnnamespace", 0)
+            parameter("grnlimit", 1)
+            parameter("prop", "extracts|categories|pageimages")
+            parameter("exintro", true)
+            parameter("explaintext", true)
+            parameter("exlimit", "max")
+        }.firstPage() ?: throw WikipediaException("Random lookup returned no page")
+
+        val base = page.toArticle(language) ?: throw WikipediaException("Random page has no id")
+
+        val neighbours = runCatching { relatedOf(language, base.id) }.getOrDefault(emptyList())
+
+        base.withNeighbours { neighbours }
+    }
+
+    /**
      * Resolves the neighbourhood of one article.
      *
      * Two requests, never more: the link list of the current page, then a single batched request
