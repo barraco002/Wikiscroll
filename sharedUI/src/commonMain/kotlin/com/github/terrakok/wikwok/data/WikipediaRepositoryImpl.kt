@@ -92,6 +92,7 @@ class WikipediaRepositoryImpl(
             parameter("grnnamespace", 0)
             parameter("grnlimit", 1)
             parameter("prop", "extracts|categories|pageimages")
+            parameter("pithumbsize", THUMBNAIL_WIDTH)
             parameter("exintro", true)
             parameter("explaintext", true)
             parameter("exlimit", "max")
@@ -160,6 +161,7 @@ class WikipediaRepositoryImpl(
             parameter("format", "json")
             parameter("formatversion", 2)
             parameter("prop", "extracts|categories|pageimages")
+            parameter("pithumbsize", THUMBNAIL_WIDTH)
             parameter("exintro", true)
             parameter("explaintext", true)
             parameter("exlimit", "max")
@@ -178,6 +180,7 @@ class WikipediaRepositoryImpl(
             parameter("format", "json")
             parameter("formatversion", 2)
             parameter("prop", "extracts|categories|pageimages")
+            parameter("pithumbsize", THUMBNAIL_WIDTH)
             parameter("exintro", true)
             parameter("explaintext", true)
             parameter("exlimit", "max")
@@ -232,6 +235,15 @@ class WikipediaRepositoryImpl(
 
         /** Value that asks the API for the maximum page size. */
         const val PL_LIMIT: String = "max"
+
+        /**
+         * Width, in pixels, requested for the lead image.
+         *
+         * The API default is 320 px, which a full-bleed card stretches across a 1080 px phone and
+         * turns into mush. The parameter is a hint, not a demand: an original narrower than this
+         * comes back at its own width, so the request never invents detail.
+         */
+        const val THUMBNAIL_WIDTH: Int = 1080
     }
 }
 

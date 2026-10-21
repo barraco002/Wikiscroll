@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -68,20 +70,34 @@ import kotlin.math.sin
  * target, and a control sitting at the bottom edge competes with the swipe gesture that advances the
  * feed.
  *
+ * Recomposition is contained on purpose. The liked set arrives as [State] instead of a boolean, so
+ * the card does not read it while composing; the read happens in the button that renders the answer,
+ * through a [derivedStateOf] that only notifies when this particular article's flag flips. Liking one
+ * article therefore repaints one button, not every card in the pager.
+ *
  * @param article content to render.
- * @param isLiked whether the article is already in the reader's likes.
- * @param onLike invoked on every tap, like and unlike alike.
- * @param onOpen invoked when the reader asks to read the full article.
+ * @param likedIds every article already in the reader's likes.
+ * @param onLike invoked with the article id on every tap, like and unlike alike.
+ * @param onOpen invoked with the article the reader asked to read in full.
  * @param modifier applied to the outermost box.
  */
 @Composable
 fun ArticleCard(
     article: Article,
-    isLiked: Boolean,
-    onLike: () -> Unit,
-    onOpen: () -> Unit,
+    likedIds: State<Set<String>>,
+    onLike: (String) -> Unit,
+    onOpen: (Article) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Keyed on the id so a recycled page does not inherit the previous article's derived state.
+    val isLiked = remember(article.id) {
+        derivedStateOf { article.id in likedIds.value }
+    }
+    // Remembered, not rebuilt on every recomposition: a fresh lambda would be an unstable parameter
+    // and would defeat the skipping the immutable article makes possible.
+    val onLikeClick = remember(article.id, onLike) { { onLike(article.id) } }
+    val onOpenClick = remember(article, onOpen) { { onOpen(article) } }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -123,7 +139,7 @@ fun ArticleCard(
         TopBar(
             languageTag = article.languageTag(),
             isLiked = isLiked,
-            onLike = onLike,
+            onLike = onLikeClick,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -158,7 +174,7 @@ fun ArticleCard(
             Box(
                 modifier = Modifier
                     .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(percent = 50))
-                    .clickable(role = Role.Button, onClick = onOpen)
+                    .clickable(role = Role.Button, onClick = onOpenClick)
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Text(
@@ -181,7 +197,7 @@ fun ArticleCard(
 @Composable
 private fun TopBar(
     languageTag: String,
-    isLiked: Boolean,
+    isLiked: State<Boolean>,
     onLike: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -235,17 +251,21 @@ private fun TopBar(
  *
  * Both effects are driven by [Animatable] because they need to start from the current value on a
  * rapid double tap; a tween on a boolean would restart from zero and stutter.
+ *
+ * The liked flag is a [State] read here rather than a boolean passed down: this is the only place
+ * that needs the answer, so this is the only scope that has to be invalidated when it changes.
  */
 @Composable
 private fun LikeButton(
-    isLiked: Boolean,
+    isLiked: State<Boolean>,
     onLike: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val scale = remember { Animatable(1f) }
     val burst = remember { Animatable(BurstFinished) }
-    val tint = if (isLiked) LikedColor else Color.White
+    val liked = isLiked.value
+    val tint = if (liked) LikedColor else Color.White
 
     Box(
         modifier = modifier
@@ -288,7 +308,7 @@ private fun LikeButton(
                     scaleY = scale.value
                 }
         ) {
-            drawHeart(filled = isLiked, color = tint)
+            drawHeart(filled = liked, color = tint)
         }
     }
 }

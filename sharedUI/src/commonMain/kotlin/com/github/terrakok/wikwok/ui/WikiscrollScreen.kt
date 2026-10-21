@@ -75,8 +75,24 @@ fun WikiscrollScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(pageCount = { uiState.articles.size })
     val uriHandler = LocalUriHandler.current
-    var likedIds by remember { mutableStateOf(emptySet<String>()) }
+    // Held as the state object rather than unpacked into a local value: the cards below read it
+    // through their own derived state, so a like invalidates one button instead of the whole pager.
+    val likedIds = remember { mutableStateOf(emptySet<String>()) }
     var selectedArticle by remember { mutableStateOf<Article?>(null) }
+
+    // Hoisted out of the pager item so the callbacks keep one identity across recompositions. A
+    // lambda rebuilt per item would be an unstable parameter and would stop the card from skipping.
+    val onLike: (String) -> Unit = remember(viewModel) {
+        { id ->
+            if (id !in likedIds.value) {
+                likedIds.value = likedIds.value + id
+                viewModel.onLike(id)
+            }
+        }
+    }
+    val onOpenArticle: (Article) -> Unit = remember {
+        { article -> selectedArticle = article }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.start()
@@ -136,14 +152,9 @@ fun WikiscrollScreen(
                             } else {
                                 ArticleCard(
                                     article = current,
-                                    isLiked = current.id in likedIds,
-                                    onLike = {
-                                        if (current.id !in likedIds) {
-                                            likedIds = likedIds + current.id
-                                            viewModel.onLike(current.id)
-                                        }
-                                    },
-                                    onOpen = { selectedArticle = current },
+                                    likedIds = likedIds,
+                                    onLike = onLike,
+                                    onOpen = onOpenArticle,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }

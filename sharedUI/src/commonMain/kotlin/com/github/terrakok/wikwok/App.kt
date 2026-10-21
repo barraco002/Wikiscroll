@@ -9,16 +9,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import coil3.compose.LocalPlatformContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.compose.LocalPlatformContext
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
 import com.github.terrakok.wikwok.data.PlatformSettingsStorage
 import com.github.terrakok.wikwok.data.SettingsStorage
+import com.github.terrakok.wikwok.data.imageCachePath
 import com.github.terrakok.wikwok.data.WikipediaRepositoryImpl
 import com.github.terrakok.wikwok.theme.AppTheme
 import com.github.terrakok.wikwok.ui.OnboardingScreen
 import com.github.terrakok.wikwok.ui.WikiscrollScreen
 import com.github.terrakok.wikwok.ui.WikiscrollViewModel
+import okio.Path.Companion.toPath
 
 /**
  * Image loader shared by every card in the feed.
@@ -44,7 +49,7 @@ fun App(
     onThemeChanged: @Composable (isDark: Boolean) -> Unit = {},
 ) = AppTheme(onThemeChanged) {
     val context = LocalPlatformContext.current
-    val imageLoader = remember(context) { ImageLoader(context) }
+    val imageLoader = remember(context) { createImageLoader(context) }
     val repository = remember { WikipediaRepositoryImpl() }
     val settings: SettingsStorage = remember { PlatformSettingsStorage() }
     var chosenTopics by remember {
@@ -72,3 +77,43 @@ fun App(
         }
     }
 }
+
+/**
+ * Builds the image loader with bounded caches.
+ *
+ * An unbounded Coil loader keeps every decoded bitmap it has ever seen, and an infinite feed will
+ * eventually hand it enough thumbnails to exhaust the heap. The memory cache is capped at a quarter
+ * of the process heap, which leaves room for the pager's own bitmaps and the rest of the app; the
+ * disk cache is capped at a fixed size so a long session cannot grow without limit.
+ *
+ * The disk cache is skipped entirely where the platform reports no directory, which is the browser
+ * and, for now, iOS. Skipping it is not a broken state: the loader still works, it just refetches
+ * over the network after a restart.
+ *
+ * @param context platform context the loader resolves dependencies from.
+ */
+private fun createImageLoader(context: PlatformContext): ImageLoader =
+    ImageLoader.Builder(context)
+        .memoryCache {
+            MemoryCache.Builder()
+                .maxSizePercent(context, MemoryCacheFraction)
+                .build()
+        }
+        .apply {
+            val directory = imageCachePath()
+            if (directory != null) {
+                diskCache {
+                    DiskCache.Builder()
+                        .directory(directory.toPath())
+                        .maxSizeBytes(DiskCacheBytes)
+                        .build()
+                }
+            }
+        }
+        .build()
+
+/** Share of the process heap the decoded-bitmap cache may occupy. */
+private const val MemoryCacheFraction = 0.25
+
+/** Hard ceiling for the on-disk image cache, in bytes. */
+private const val DiskCacheBytes = 100L * 1024 * 1024

@@ -60,6 +60,7 @@ class WikipediaRepositoryRequestTest {
         assertTrue(mainUrl.contains("prop=extracts%7Ccategories%7Cpageimages"), mainUrl)
         assertTrue(mainUrl.contains("exintro=true"))
         assertTrue(mainUrl.contains("explaintext=true"))
+        assertTrue(mainUrl.contains("pithumbsize=1080"), mainUrl)
     }
 
     @Test

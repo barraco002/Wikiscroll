@@ -14,8 +14,8 @@ android {
         targetSdk = 37
 
         applicationId = "com.github.terrakok.wikwok.androidApp"
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -37,8 +37,12 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
-            if (properties.contains("key.file")) {
-                signingConfig = signingConfigs.getByName("release")
+            // Falls back to the debug key so a release build is installable without provisioning a
+            // keystore. A distribution key stays opt-in through the key.* properties.
+            signingConfig = if (properties.contains("key.file")) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.github.terrakok.wikwok.domain
 
+import androidx.compose.runtime.Immutable
+
 /**
  * One Wikipedia article as the feed sees it.
  *
@@ -15,7 +17,15 @@ package com.github.terrakok.wikwok.domain
  *   are not requested: the card crops whatever the API offers.
  * @property neighboursProvider lazy edge source. Kept as a provider instead of an eager list so a
  * cyclic graph can be built without allocating the whole component up front.
+ *
+ * The class is annotated [Immutable] on purpose. Every property is a val and the provider is a
+ * final function reference, so an instance never changes after construction. Without the
+ * annotation the compiler treats the type as unstable: a function-typed constructor parameter has
+ * no equality the compose runtime can trust, and an unstable parameter makes every composable that
+ * receives an article impossible to skip. That is the difference between a like tap repainting one
+ * button and re-running every card on screen.
  */
+@Immutable
 data class Article(
     val id: String,
     val title: String,
