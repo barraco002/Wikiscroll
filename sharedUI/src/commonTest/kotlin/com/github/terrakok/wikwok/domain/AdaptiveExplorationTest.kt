@@ -84,7 +84,7 @@ class AdaptiveExplorationTest {
     @Test
     fun aDwellEventRecordsADwellSignal() {
         val state = engine().processEvent(
-            InteractionEvent.DwellTime("en:1", listOf(topCategory), 9_000L),
+            InteractionEvent.DwellTime("en:1", listOf(topCategory), 9_000L, expectedDurationMs = 8_000L),
             InterestState(),
             100L,
         )
@@ -117,7 +117,7 @@ class AdaptiveExplorationTest {
     @Test
     fun aMediumStayRecordsNoSignal() {
         val state = engine().processEvent(
-            InteractionEvent.DwellTime("en:1", listOf(topCategory), 4_000L),
+            InteractionEvent.DwellTime("en:1", listOf(topCategory), 5_600L, expectedDurationMs = 8_000L),
             InterestState(),
             100L,
         )

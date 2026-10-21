@@ -24,30 +24,43 @@ sealed class InteractionEvent {
      *
      * @property durationMs time between the pager settling on the page and the pager leaving it.
      * Must be non-negative; the engine decides whether the value clears the interest threshold.
+     * @property expectedDurationMs time this card needed, taken from [Article.expectedReadMs]. The
+     *   event carries it because the engine never sees the article: ranking works on candidates, and
+     *   an event that had to look the article up would not be replayable from a log. The default is
+     *   the estimate for the shortest readable card, so a caller that does not know the length still
+     *   produces a sane verdict instead of a division by zero.
      */
     data class DwellTime(
         override val articleId: String,
         override val categories: List<String>,
         val durationMs: Long,
+        val expectedDurationMs: Long = Article.DEFAULT_EXPECTED_READ_MS,
     ) : InteractionEvent() {
         init {
             require(durationMs >= 0) { "durationMs must be non-negative, was $durationMs" }
+            require(expectedDurationMs > 0) {
+                "expectedDurationMs must be positive, was $expectedDurationMs"
+            }
         }
     }
 
     /**
      * The reader left the article faster than the rejection threshold.
      *
-     * The engine re-checks the duration, so a caller that misclassifies a slow interaction cannot
-     * damage the interest model.
+     * The engine re-checks the duration against [expectedDurationMs], so a caller that misclassifies
+     * a slow interaction cannot damage the interest model.
      */
     data class FastSwipe(
         override val articleId: String,
         override val categories: List<String>,
         val durationMs: Long,
+        val expectedDurationMs: Long = Article.DEFAULT_EXPECTED_READ_MS,
     ) : InteractionEvent() {
         init {
             require(durationMs >= 0) { "durationMs must be non-negative, was $durationMs" }
+            require(expectedDurationMs > 0) {
+                "expectedDurationMs must be positive, was $expectedDurationMs"
+            }
         }
     }
 

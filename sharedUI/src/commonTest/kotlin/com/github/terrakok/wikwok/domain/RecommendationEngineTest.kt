@@ -19,11 +19,19 @@ class RecommendationEngineTest {
 
     private fun engine(seed: Long = 42L) = RecommendationEngine(Random(seed))
 
-    private fun dwell(articleId: String, categories: List<String>, durationMs: Long) =
-        InteractionEvent.DwellTime(articleId, categories, durationMs)
+    private fun dwell(
+        articleId: String,
+        categories: List<String>,
+        durationMs: Long,
+        expectedMs: Long = Article.DEFAULT_EXPECTED_READ_MS,
+    ) = InteractionEvent.DwellTime(articleId, categories, durationMs, expectedMs)
 
-    private fun swipe(articleId: String, categories: List<String>, durationMs: Long) =
-        InteractionEvent.FastSwipe(articleId, categories, durationMs)
+    private fun swipe(
+        articleId: String,
+        categories: List<String>,
+        durationMs: Long,
+        expectedMs: Long = Article.DEFAULT_EXPECTED_READ_MS,
+    ) = InteractionEvent.FastSwipe(articleId, categories, durationMs, expectedMs)
 
     private fun like(articleId: String, categories: List<String>) =
         InteractionEvent.LikeAction(articleId, categories)
@@ -31,9 +39,9 @@ class RecommendationEngineTest {
     // region Scoring and thresholds
 
     @Test
-    fun dwellAtThresholdAwardsTwoPoints() {
+    fun dwellThatReachesTheExpectedTimeAwardsTwoPoints() {
         val state = engine().processEvent(
-            event = dwell("en:1", listOf("History"), 8_000L),
+            event = dwell("en:1", listOf("History"), 8_000L, expectedMs = 8_000L),
             currentState = InterestState(),
             todayEpochDay = 10L,
         )
@@ -44,9 +52,9 @@ class RecommendationEngineTest {
     }
 
     @Test
-    fun dwellBelowThresholdScoresNothingButRecordsSession() {
+    fun dwellBelowTheExpectedTimeScoresNothingButRecordsSession() {
         val state = engine().processEvent(
-            event = dwell("en:1", listOf("History"), 7_999L),
+            event = dwell("en:1", listOf("History"), 7_999L, expectedMs = 8_000L),
             currentState = InterestState(),
             todayEpochDay = 10L,
         )
@@ -57,7 +65,58 @@ class RecommendationEngineTest {
     }
 
     @Test
-    fun fastSwipeBelowThresholdSubtractsOne() {
+    fun theSameStayScoresDifferentlyOnAShortAndALongCard() {
+        val short = engine().processEvent(
+            event = dwell("en:1", listOf("History"), 10_000L, expectedMs = 8_000L),
+            currentState = InterestState(),
+            todayEpochDay = 10L,
+        )
+        val long = engine().processEvent(
+            event = dwell("en:2", listOf("History"), 10_000L, expectedMs = 30_000L),
+            currentState = InterestState(),
+            todayEpochDay = 10L,
+        )
+
+        assertEquals(
+            RecommendationEngine.SCORE_DWELL_POINTS,
+            short.scoreOf("History"),
+            "ten seconds finishes a card that needs eight",
+        )
+        assertEquals(0, long.scoreOf("History"), "ten seconds is a third of a card that needs thirty")
+    }
+
+    @Test
+    fun aSecondPassOverTheCardScoresAboveAPlainDwell() {
+        val state = engine().processEvent(
+            event = dwell("en:1", listOf("History"), 17_000L, expectedMs = 8_000L),
+            currentState = InterestState(),
+            todayEpochDay = 10L,
+        )
+
+        assertEquals(RecommendationEngine.SCORE_DEEP_READ_POINTS, state.scoreOf("History"))
+        assertTrue(
+            RecommendationEngine.SCORE_DEEP_READ_POINTS > RecommendationEngine.SCORE_DWELL_POINTS,
+            "a second pass has to be worth more than one",
+        )
+    }
+
+    @Test
+    fun aSwipePastHalfOfTheExpectedTimeIsNotARejection() {
+        val state = engine().processEvent(
+            event = swipe("en:1", listOf("Football"), 9_000L, expectedMs = 16_000L),
+            currentState = InterestState(),
+            todayEpochDay = 10L,
+        )
+
+        assertEquals(0, state.scoreOf("Football"))
+        assertTrue(
+            state.recentlyRejectedCategories.isEmpty(),
+            "nine seconds of a sixteen second card is a skim, not a verdict",
+        )
+    }
+
+    @Test
+    fun fastSwipeBelowHalfTheExpectedTimeSubtractsOne() {
         val state = engine().processEvent(
             event = swipe("en:2", listOf("History"), 1_200L),
             currentState = InterestState(userInterestScores = mapOf("History" to 3)),

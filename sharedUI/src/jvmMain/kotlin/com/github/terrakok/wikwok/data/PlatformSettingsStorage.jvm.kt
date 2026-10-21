@@ -20,4 +20,22 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
             preferences.putBoolean(SettingsKeys.ONBOARDING_COMPLETED, value)
             runCatching { preferences.flush() }
         }
+
+    /**
+     * Stored with the same key and the same best-effort flush as the flag.
+     *
+     * java.util.prefs writes through to its backing store synchronously, so a profile write is a
+     * small file operation on the calling thread. It is bounded by the profile size, which the codec
+     * caps at a two hundred entry history.
+     */
+    override var savedProfile: String?
+        get() = preferences.get(SettingsKeys.INTEREST_PROFILE, null)
+        set(value) {
+            if (value == null) {
+                preferences.remove(SettingsKeys.INTEREST_PROFILE)
+            } else {
+                preferences.put(SettingsKeys.INTEREST_PROFILE, value)
+            }
+            runCatching { preferences.flush() }
+        }
 }

@@ -1,9 +1,13 @@
 package com.github.terrakok.wikwok.ui
 
+import com.github.terrakok.wikwok.data.InterestStateCodec
+import com.github.terrakok.wikwok.data.ProfileStore
+import com.github.terrakok.wikwok.data.SettingsStorage
 import com.github.terrakok.wikwok.data.WikipediaRepository
 import com.github.terrakok.wikwok.domain.Article
 import com.github.terrakok.wikwok.domain.InterestState
 import com.github.terrakok.wikwok.domain.RecommendationEngine
+import com.github.terrakok.wikwok.domain.ReadingSignal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -226,4 +230,127 @@ class WikiscrollViewModelTest {
             viewModel.uiState.value.interest.userInterestScores.size,
         )
     }
+
+    // region Persistence
+
+    /** In-memory settings backend, standing in for the four platform implementations. */
+    private class MemoryStorage : SettingsStorage {
+        override var isOnboardingCompleted: Boolean = false
+        override var savedProfile: String? = null
+    }
+
+    @Test
+    fun aLearnedProfileComesBackOnTheNextLaunch() = runTest(dispatcher.scheduler) {
+        val storage = MemoryStorage()
+        val first = WikiscrollViewModel(FakeRepository(), profileStore = ProfileStore(storage))
+        first.onLike(first.uiState.value.articles.first().id)
+        assertEquals(
+            RecommendationEngine.SCORE_LIKE_POINTS,
+            first.uiState.value.interest.scoreOf("Science"),
+        )
+
+        val second = WikiscrollViewModel(FakeRepository(), profileStore = ProfileStore(storage))
+
+        assertEquals(
+            RecommendationEngine.SCORE_LIKE_POINTS,
+            second.uiState.value.interest.scoreOf("Science"),
+            "the weight learned before the restart must survive it",
+        )
+        assertEquals(1, second.uiState.value.interest.articlesRead)
+    }
+
+    @Test
+    fun theFirstLaunchHasNothingToRestore() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository(), profileStore = ProfileStore(MemoryStorage()))
+
+        assertTrue(viewModel.uiState.value.interest.userInterestScores.isEmpty())
+    }
+
+    @Test
+    fun aStoredProfileKeepsItsWeightsAndLosesYesterdayPenalties() = runTest(dispatcher.scheduler) {
+        val storage = MemoryStorage()
+        storage.savedProfile = InterestStateCodec.encode(
+            InterestState(
+                userInterestScores = mapOf("History" to 9),
+                articlesRead = 12,
+                recentlyRejectedCategories = mapOf("Sport" to 3),
+                recentSignals = listOf(ReadingSignal.FastSwipe),
+            ),
+        )
+
+        val viewModel = WikiscrollViewModel(FakeRepository(), profileStore = ProfileStore(storage))
+        val interest = viewModel.uiState.value.interest
+
+        assertEquals(9, interest.scoreOf("History"))
+        assertEquals(12, interest.articlesRead)
+        assertTrue(interest.recentlyRejectedCategories.isEmpty(), "the block expired with the process")
+        assertTrue(interest.recentSignals.isEmpty(), "the band starts neutral")
+    }
+
+    @Test
+    fun seedingIsStoredBeforeTheFirstSwipe() = runTest(dispatcher.scheduler) {
+        val storage = MemoryStorage()
+        val viewModel = WikiscrollViewModel(FakeRepository(), profileStore = ProfileStore(storage))
+        assertTrue(storage.savedProfile == null, "nothing is stored until there is something to store")
+
+        viewModel.seedInterests(listOf("Cosmology"))
+
+        val restored = ProfileStore(storage).load()
+        assertEquals(InterestState.SEED_INTEREST_POINTS, restored?.scoreOf("Cosmology"))
+    }
+
+    // endregion
+
+    // region Session metrics
+
+    @Test
+    fun twoEventsOnOneCardCountOneCard() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+        val id = viewModel.uiState.value.articles.first().id
+
+        viewModel.onLike(id)
+        viewModel.onReadMore(id)
+
+        val metrics = viewModel.metrics.value
+        assertEquals(1, metrics.articlesRead)
+        assertEquals(1, metrics.likes)
+        assertEquals(1, metrics.openMoreCount)
+    }
+
+    @Test
+    fun anEarlyExitIsCountedAgainstTheFixtureCardLength() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+        val id = viewModel.uiState.value.articles.first().id
+
+        // The fixture articles carry no extract, so the expected time is the shortest readable card:
+        // sixteen seconds, which makes anything under eight seconds an early exit.
+        viewModel.onFastSwipe(id, 2_000L)
+
+        val metrics = viewModel.metrics.value
+        assertEquals(1, metrics.articlesRead)
+        assertEquals(1, metrics.fastSwipes)
+        assertEquals(2_000L, metrics.totalDwellMs)
+    }
+
+    @Test
+    fun aCardReadToTheEndIsNotAnEarlyExit() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+        val id = viewModel.uiState.value.articles.first().id
+
+        viewModel.onDwellTime(id, 17_000L)
+
+        assertEquals(0, viewModel.metrics.value.fastSwipes)
+        assertEquals(17_000L, viewModel.metrics.value.totalDwellMs)
+    }
+
+    @Test
+    fun anIgnoredEventLeavesTheCountersAlone() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+
+        viewModel.onLike("en:never-loaded")
+
+        assertTrue(viewModel.metrics.value.isEmpty, "a card that was never on screen cannot be counted")
+    }
+
+    // endregion
 }

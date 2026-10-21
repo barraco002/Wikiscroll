@@ -17,4 +17,13 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
         set(value) {
             defaults.setBool(value, forKey = SettingsKeys.ONBOARDING_COMPLETED)
         }
+
+    /**
+     * A null value removes the key, which NSUserDefaults expresses as setting the object to nil.
+     */
+    override var savedProfile: String?
+        get() = defaults.stringForKey(SettingsKeys.INTEREST_PROFILE)
+        set(value) {
+            defaults.setObject(value, forKey = SettingsKeys.INTEREST_PROFILE)
+        }
 }

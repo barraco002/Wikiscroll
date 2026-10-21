@@ -1,15 +1,31 @@
 package com.github.terrakok.wikwok.ui
 
-import com.github.terrakok.wikwok.domain.RecommendationEngine
+import com.github.terrakok.wikwok.domain.Article
+import com.github.terrakok.wikwok.domain.ReadingPolicy
 
-/** A closed reading interval: the article the reader was on and how long they stayed. */
-data class DwellReport(val articleId: String, val durationMs: Long) {
+/**
+ * A closed reading interval: the article the reader was on and how long they stayed.
+ *
+ * @property articleId the card that was on screen.
+ * @property durationMs measured time between arrival and departure.
+ * @property expectedDurationMs time that card needed, from [Article.expectedReadMs]. It travels with
+ *   the report because the verdict is relative: the same interval is a finished card or an early
+ *   exit depending on what was on screen.
+ */
+data class DwellReport(
+    val articleId: String,
+    val durationMs: Long,
+    val expectedDurationMs: Long = Article.DEFAULT_EXPECTED_READ_MS,
+) {
 
     /** True when the stay is long enough to count as interest. */
-    val isDwell: Boolean get() = durationMs >= RecommendationEngine.MIN_DWELL_MS
+    val isDwell: Boolean get() = ReadingPolicy.isDwell(durationMs, expectedDurationMs)
 
     /** True when the stay is short enough to count as rejection. */
-    val isFastSwipe: Boolean get() = durationMs < RecommendationEngine.FAST_SWIPE_MS
+    val isFastSwipe: Boolean get() = ReadingPolicy.isFastSwipe(durationMs, expectedDurationMs)
+
+    /** True when the reader finished the card and stayed on it. */
+    val isDeepRead: Boolean get() = ReadingPolicy.isDeepRead(durationMs, expectedDurationMs)
 }
 
 /**
@@ -22,6 +38,10 @@ data class DwellReport(val articleId: String, val durationMs: Long) {
  * not. [arrive] opens a measurement, [leave] closes it and returns the interval. A second [arrive]
  * without an intervening [leave] is ignored, so two snapshots of the same settled page cannot
  * restart the clock and erase a long read.
+ *
+ * The session measures; it does not judge. Whether an interval is a dwell or a rejection depends on
+ * the card, which the session never sees, so the classification lives on [DwellReport] where the
+ * caller can attach the article's expectation.
  *
  * @param clock monotonic-enough millisecond source. Injected so a test can move time by hand.
  */

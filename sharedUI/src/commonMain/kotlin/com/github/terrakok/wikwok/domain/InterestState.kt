@@ -1,11 +1,14 @@
 package com.github.terrakok.wikwok.domain
 
+import kotlinx.serialization.Serializable
+
 /**
  * A single observation about how the last card landed.
  *
  * Only two outcomes matter to the policy: the reader stayed, or the reader left immediately. A
  * medium stay carries no signal because it neither confirms nor rejects the topic.
  */
+@Serializable
 enum class ReadingSignal {
 
     /** The reader stayed past the dwell threshold, or asked for the article explicitly. */
@@ -24,7 +27,8 @@ enum class ReadingSignal {
  *
  * @property userInterestScores accumulated points per category. Never negative.
  * @property sessionHistory ids of the articles already served, oldest first, bounded to
- * [MAX_SESSION_HISTORY] entries so a long session cannot grow without limit.
+ * [MAX_SESSION_HISTORY] entries so a long session cannot grow without limit. The window outlives
+ * the process, so a card the reader saw yesterday does not come back after a restart.
  * @property seenCategories every category ever served, used by the exploration arm.
  * @property articlesRead number of cards served, drives the variable-ratio reward schedule.
  * @property streak consecutive-day reading streak.
@@ -35,6 +39,7 @@ enum class ReadingSignal {
  * [explorationRate] and is deliberately separate from [sessionHistory]: the history answers what
  * was shown, this answers how it went.
  */
+@Serializable
 data class InterestState(
     val userInterestScores: Map<String, Int> = emptyMap(),
     val sessionHistory: List<String> = emptyList(),
@@ -223,6 +228,18 @@ data class InterestState(
         )
     }
 
+    /**
+     * Returns the profile with the session-scoped bookkeeping cleared.
+     *
+     * Used when a stored profile is loaded. Penalties and the signal window describe the last few
+     * minutes of a session that has already ended: carrying them into the next launch would open the
+     * feed with a topic buried by a swipe the reader has long forgotten, and would start the
+     * exploration band in whatever mood the previous session finished in. Everything that describes
+     * the reader rather than the moment is kept.
+     */
+    internal fun withoutSessionState(): InterestState =
+        copy(recentlyRejectedCategories = emptyMap(), recentSignals = emptyList())
+
     companion object {
         /** Hard cap on [sessionHistory], large enough to prevent repeats inside a session. */
         const val MAX_SESSION_HISTORY: Int = 200
@@ -269,6 +286,7 @@ private fun String.containsTopic(topic: String): Boolean {
  * Stored as an epoch day rather than a timestamp so that daylight-saving transitions and time
  * zones cannot break the sequence.
  */
+@Serializable
 data class Streak(
     val days: Int = 0,
     val lastVisitEpochDay: Long? = null,

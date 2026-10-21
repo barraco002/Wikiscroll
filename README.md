@@ -18,12 +18,14 @@ This repository is an Apache-2.0 fork of [WikWok](https://github.com/terrakok/Wi
 ## Core Features
 
 - **Dopamine-driven recommendation algorithm.** A variable-ratio schedule drives the feed: exploitation of high-interest categories most of the time, unpredictable exploration the rest. The reward is the article, and the interval is never announced.
-- **Dwell-aware interest model.** Reading time, not clicks, is the primary signal. Articles that hold attention raise the weight of their categories; articles swiped past in under 1.5 seconds lower it.
+- **Dwell-aware interest model.** Reading time, not clicks, is the primary signal. Every stay is judged against the time the card needed, so an article that holds attention raises the weight of its categories and one abandoned before half of its reading time lowers it.
+- **The profile is persisted.** Each recorded interaction is encoded into a versioned JSON envelope and written to the platform settings store, so a restart resumes the model instead of starting over. A schema version this build does not own is dropped rather than migrated: losing a profile costs one session, a decode path for every historical schema costs a crash on launch.
+- **Local session metrics.** A counters panel reports articles read, reading time, average per card, likes, opens and fast swipes. Every number comes from the same events the engine scored, on the device, with no identifier and no network call: the retention claim is one the reader can audit.
 - **Daily streaks.** Consecutive-day reading is tracked as `(lastVisitEpochDay, streak)`, so time zones and daylight-saving changes cannot break it.
 - **Variable ratio rewards.** Every tenth article pays out from a weighted table. The interval is fixed and the payout is not - the classic variable-ratio shape, applied to knowledge instead of slot reels.
 - **Random walk navigation.** The next card is sampled from the current article's graph neighbourhood, so a session reads as a train of thought instead of a slot machine.
 - **Multiplatform by construction.** One Compose Multiplatform UI, one shared domain layer, four targets: Android, iOS, desktop (JVM) and web (Wasm).
-- **No account, no telemetry.** Scores live in local storage. There is no analytics SDK in the dependency graph and no server to send them to.
+- **No account, no telemetry.** Scores live in local storage. There is no analytics SDK in the dependency graph and no server to send them to. The metrics panel exists precisely because the usual answer to "does this work?" is an SDK, a dashboard and an identifier.
 
 ## Screenshots
 
@@ -41,15 +43,26 @@ Four interaction events feed a persisted score per category.
 
 | Event | Condition | Weight | Side effect |
 |---|---|---|---|
-| `DwellTime` | article visible for >= 8.0 s | **+2** | counts as a dwell |
-| `FastSwipe` | advanced in < 1.5 s | **-1** | buries the categories for 5 cards |
+| `DwellTime` | stay >= 100 % of the card's expected reading time | **+2** | counts as a dwell |
+| `DwellTime` | stay >= 200 % of it (a second pass) | **+3** | counts as a dwell |
+| `FastSwipe` | stay < 50 % of it | **-1** | buries the categories for 5 cards |
 | `LikeAction` | explicit tap | **+5**, confetti burst | counts as a dwell |
 | `ReadMore` | reader opens the full article | **+10** | counts as a dwell |
-| none | 1.5 s to 8.0 s | 0 - deliberate dead zone | - |
+| none | 50 % to 100 % of it | 0 - deliberate dead zone | - |
 
 A like costs a tap. Opening the article costs attention, and it is the only signal emitted after the reader has decided the summary was not enough, so it is worth twice a like. Both are idempotent per article: a second tap cannot inflate the profile, and an unknown article is never recorded.
 
 The timer starts when the pager settles on a page and stops on scroll-away, so prefetching cannot inflate it.
+
+### Expected reading time
+
+```text
+expectedMs = clamp(extract.length, 240, 450) / 15 characters per second
+```
+
+Eight seconds is not a verdict, it is a stopwatch reading. The card shows at most five lines of extract, which is roughly 450 characters on a phone, so the estimate saturates there: without the ceiling a 6,000-character article would demand four minutes on screen before scoring, and every long article would silently stop producing dwell signals altogether. The floor covers the other end, where a stub is still a card the reader has to parse.
+
+The result is that the same ten seconds scores **+2** on a card that needed eight and **0** on one that needed thirty, and a nine-second exit buries the topic of a long article while it is only a skim on a short one. Both directions are test cases.
 
 ```text
 UserInterestScore(c) = max(0, sum of weights of every event on an article in category c)
@@ -155,13 +168,17 @@ Wikiscroll/
   iosApp/         Xcode project and SwiftUI host
   webApp/         Wasm browser entry point
   sharedUI/       product logic and UI (Compose Multiplatform)
-    data/         Wikipedia API client, persistence, platform services
-    domain/       RecommendationEngine, InterestState, rewards   (Phase 2)
-    ui/           feed screen, dwell instrumentation, confetti   (Phase 3)
+    data/         Wikipedia API client, ProfileStore, InterestStateCodec, platform services
+    domain/       RecommendationEngine, InterestState, ReadingPolicy, SessionMetrics, rewards
+    ui/           feed screen, dwell instrumentation, metrics panel, confetti
     theme/        Material 3 theming
 ```
 
 Dependencies point one way: presentation reads domain, domain requires data, and data never sees Compose. The domain layer is plain Kotlin with a seedable `Random`, so the whole policy is testable without a device or a network.
+
+Persistence sits behind one interface. `ProfileStore` reads and writes a single versioned JSON envelope through `SettingsStorage`, which each platform implements over what it already has: SharedPreferences on Android, a properties file on desktop, `localStorage` in the browser and `NSUserDefaults` on iOS. `InterestStateCodec` owns the schema and refuses to guess: an unknown version or unparseable payload yields `null`, and the caller falls back to the onboarding seed. Losing a profile costs one session; a decode path for every schema that ever shipped costs a crash on launch, and that trade is cheap in one direction only.
+
+The session layer is dropped on load. Recent rejections and the signal window are facts about the reader five minutes ago, not about today, and replaying them would bury a topic the reader might well open in the morning. 
 
 ## How to Build
 
@@ -190,9 +207,10 @@ Background research and the full task breakdown live in [docs/RESEARCH.md](docs/
 - [x] **Phase 1 - Fork and identity.** Apache-2.0 fork, remotes wired, README and algorithm specification.
 - [x] **Phase 2 - Recommendation engine.** `RecommendationEngine`, `InterestState`, adaptive 70/30 policy, interaction weights, quality gate, narrative pathing, authority multiplier, anti-boredom penalties, streak and reward tables.
 - [x] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article, onboarding with interest seeding, most-viewed cold start.
-- [ ] **Phase 4 - Persistence and polish.** Interest vector in KStore, offline cache, accessibility pass.
+- [x] **Phase 4 - Persistence.** The interest vector survives a restart as a versioned JSON envelope in the platform settings store; a local counters panel behind the chart control reports what the session actually did.
+- [ ] **Phase 5 - Polish.** Offline cache of seen articles, connectivity-aware loading, accessibility pass over the card and the pager.
 
-Contributions are welcome: the domain layer has a stable contract and 104 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.
+Contributions are welcome: the domain layer has a stable contract and 138 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.
 
 Two ground rules for pull requests. Every behavioural change needs a test that fails without it. Any change to the event weights or the payout table needs a short note in the pull request explaining the expected effect on reading time.
 

@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -85,6 +87,7 @@ import kotlin.math.sin
  * @param onReadMore invoked with the article id when the reader asks for the full text, before the
  *   link is opened. It exists separately from [onOpen] because it is the strongest retention
  *   signal the app can record and must reach the policy even when the browser fails to launch.
+ * @param onOpenMetrics invoked when the reader taps the counters control in the top bar.
  * @param modifier applied to the outermost box.
  */
 @Composable
@@ -94,6 +97,7 @@ fun ArticleCard(
     onLike: (String) -> Unit,
     onOpen: (Article) -> Unit,
     onReadMore: (String) -> Unit = {},
+    onOpenMetrics: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Keyed on the id so a recycled page does not inherit the previous article's derived state.
@@ -158,6 +162,7 @@ fun ArticleCard(
             languageTag = article.languageTag(),
             isLiked = isLiked,
             onLike = onLikeClick,
+            onOpenMetrics = onOpenMetrics,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -222,6 +227,7 @@ private fun TopBar(
     languageTag: String,
     isLiked: State<Boolean>,
     onLike: () -> Unit,
+    onOpenMetrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -247,6 +253,7 @@ private fun TopBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            MetricsButton(onOpenMetrics = onOpenMetrics)
             Canvas(
                 modifier = Modifier
                     .size(34.dp)
@@ -265,6 +272,30 @@ private fun TopBar(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
             LikeButton(isLiked = isLiked, onLike = onLike)
+        }
+    }
+}
+
+/**
+ * Counters control: three rising bars in the same pill as the star.
+ *
+ * Drawn rather than shipped as an asset, for the same reasons as the heart and the star: one shape,
+ * no resource lookup on the composition path, and it stays sharp at any density. The visible pill is
+ * 34dp to line up with the star, while the touch target is the 48dp the platform asks for.
+ */
+@Composable
+private fun MetricsButton(onOpenMetrics: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .background(Color.Black.copy(alpha = PillAlpha), RoundedCornerShape(percent = 50))
+            .minimumInteractiveComponentSize()
+            .semantics { stateDescription = "Session metrics" }
+            .clickable(role = Role.Button, onClickLabel = "Open session metrics") { onOpenMetrics() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(16.dp)) {
+            drawBars(color = Color.White)
         }
     }
 }
@@ -343,6 +374,25 @@ private fun LikeButton(
 }
 
 /**
+ * Draws three bars of rising height inside the current canvas.
+ *
+ * The widths and the step are fractions of the canvas, so the icon keeps its proportions whatever
+ * size the caller gives it.
+ */
+private fun DrawScope.drawBars(color: Color) {
+    val barWidth = size.width * BarWidthFraction
+    val step = size.width * BarStepFraction
+    BarHeights.forEachIndexed { index, fraction ->
+        val height = size.height * fraction
+        drawRect(
+            color = color,
+            topLeft = Offset(x = index * step, y = size.height - height),
+            size = Size(width = barWidth, height = height),
+        )
+    }
+}
+
+/**
  * Draws the heart inside the current canvas.
  *
  * Hand-drawn instead of shipped as an icon asset: the same path is reused for the filled and the
@@ -406,6 +456,15 @@ private const val TopScrimAlpha = 0.45f
 
 /** Burst progress that marks the animation as over and the circle as invisible. */
 private const val BurstFinished = 1f
+
+/** Width of one bar of the counters icon, as a fraction of the canvas. */
+private const val BarWidthFraction = 0.22f
+
+/** Distance between the left edges of two bars, as a fraction of the canvas. */
+private const val BarStepFraction = 0.39f
+
+/** Height of each bar, as a fraction of the canvas, left to right. */
+private val BarHeights = listOf(0.45f, 0.72f, 1f)
 
 /**
  * Palettes for cards without a lead image, ordered from specific to generic.

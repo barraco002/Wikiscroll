@@ -4,6 +4,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.github.terrakok.wikwok.data.ProfileStore
 import com.github.terrakok.wikwok.data.WikipediaRepository
 import com.github.terrakok.wikwok.domain.Article
 import com.github.terrakok.wikwok.domain.InteractionEvent
@@ -14,6 +15,7 @@ import com.github.terrakok.wikwok.domain.InteractionEvent.ReadMore
 import com.github.terrakok.wikwok.domain.InterestState
 import com.github.terrakok.wikwok.domain.RecommendationEngine
 import com.github.terrakok.wikwok.domain.Reward
+import com.github.terrakok.wikwok.domain.SessionMetrics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,17 +78,25 @@ data class WikiscrollUiState(
  * @param repository data source.
  * @param engine recommendation policy. Stateless apart from its random source.
  * @param language wiki edition the feed reads from.
+ * The profile is persisted, so the model survives process death. Without that the whole engine
+ * restarts from zero on every cold start, which makes the personalisation a demo: the second launch
+ * would greet a reader who spent ten minutes on history with the same random article the first one
+ * did. Storage is optional in the constructor so a test can run the policy without a filesystem,
+ * and every production call site passes it.
+ *
  * @param nowEpochDay clock used for streaks, injected so tests control the calendar.
  * @param initialTopics topics chosen before the feed existed, applied before the first read.
+ * @param profileStore persistence for the interest profile, or null to run without one.
  */
 class WikiscrollViewModel(
     private val repository: WikipediaRepository,
     private val engine: RecommendationEngine = RecommendationEngine(),
     private val language: String = DEFAULT_LANGUAGE,
     private val nowEpochDay: () -> Long = {
-        Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays().toLong()
+        Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays()
     },
     initialTopics: List<String> = emptyList(),
+    private val profileStore: ProfileStore? = null,
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<WikiscrollUiState> = MutableStateFlow(WikiscrollUiState())
@@ -94,12 +104,44 @@ class WikiscrollViewModel(
     /** Observable state consumed by the feed screen. */
     val uiState: StateFlow<WikiscrollUiState> = _uiState.asStateFlow()
 
+    private val _metrics: MutableStateFlow<SessionMetrics> = MutableStateFlow(SessionMetrics())
+
+    /**
+     * Counters for the session so far, consumed only by the metrics panel.
+     *
+     * A separate flow rather than a field of [WikiscrollUiState]: the feed screen already collects
+     * the UI state, and folding the counters in would recompose the pager on every dwell event to
+     * paint a panel nobody has open.
+     */
+    val metrics: StateFlow<SessionMetrics> = _metrics.asStateFlow()
+
+    /**
+     * Articles that already contributed to [SessionMetrics.articlesRead].
+     *
+     * Kept here rather than in the counters so the counters stay a value: the first event of a card
+     * is what counts the card, the rest only add to the totals.
+     */
+    private val meteredIds: MutableSet<String> = mutableSetOf()
+
     /** Serialises buffer refills so two swipes in a row cannot load the same article twice. */
     private val bufferMutex: Mutex = Mutex()
 
     init {
+        restoreProfile()
         seedInterests(initialTopics)
         start()
+    }
+
+    /**
+     * Replaces the empty profile with the one stored by the previous run.
+     *
+     * Runs before [seedInterests] so the onboarding seed still applies on a first launch, and does
+     * nothing when there is no stored profile: an unreadable profile degrades to a fresh one, which
+     * is the only failure the reader cannot notice.
+     */
+    private fun restoreProfile() {
+        val stored = profileStore?.load() ?: return
+        _uiState.update { state -> state.copy(interest = stored) }
     }
 
     /** Loads the first article if the feed is still empty. Safe to call more than once. */
@@ -128,17 +170,21 @@ class WikiscrollViewModel(
     /**
      * Records a long read.
      *
-     * The engine applies [RecommendationEngine.MIN_DWELL_MS] as its own threshold, so a value below
-     * it is not an error: it is a read that did not qualify, and the engine still marks the article
-     * as served.
+     * The engine classifies the duration against the time this card needed, so a value that does not
+     * qualify is not an error: it is a read that stopped mid-card, and the engine still marks the
+     * article as served.
      */
     fun onDwellTime(articleId: String, durationMs: Long) {
-        recordEvent(articleId) { article -> DwellTime(article.id, article.categories, durationMs) }
+        recordEvent(articleId) { article ->
+            DwellTime(article.id, article.categories, durationMs, article.expectedReadMs)
+        }
     }
 
-    /** Records a swipe that crossed the page in under [RecommendationEngine.FAST_SWIPE_MS]. */
+    /** Records a swipe that left the card before half of its expected reading time. */
     fun onFastSwipe(articleId: String, durationMs: Long) {
-        recordEvent(articleId) { article -> FastSwipe(article.id, article.categories, durationMs) }
+        recordEvent(articleId) { article ->
+            FastSwipe(article.id, article.categories, durationMs, article.expectedReadMs)
+        }
     }
 
     /**
@@ -206,6 +252,9 @@ class WikiscrollViewModel(
         if (seeded.isEmpty()) return
 
         _uiState.update { state -> state.copy(interest = state.interest.seededWith(seeded)) }
+        // Stored immediately: a reader who picks topics and closes the app before the first swipe
+        // would otherwise be asked again, because the only other write happens on an interaction.
+        persistProfile()
     }
 
     /** Consumes the pending reward so the UI does not show it twice. */
@@ -226,16 +275,34 @@ class WikiscrollViewModel(
         // overwritten.
         if (_uiState.value.articles.none { article -> article.id == articleId }) return false
 
+        // The event is captured rather than rebuilt afterwards: the lambda receives the article, and
+        // a second lookup would produce a second event object for the counters to disagree with.
+        var recorded: InteractionEvent? = null
         _uiState.update { state ->
             val article = state.articles.firstOrNull { candidate -> candidate.id == articleId }
                 ?: return@update state
-            val interest = engine.processEvent(event(article), state.interest, nowEpochDay())
+            val interaction = event(article)
+            recorded = interaction
+            val interest = engine.processEvent(interaction, state.interest, nowEpochDay())
             state.copy(
                 interest = interest,
                 pendingReward = engine.checkReward(interest) ?: state.pendingReward,
             )
         }
+        val interaction = recorded ?: return false
+
+        // Counters and persistence run after the state write, not inside it: the update lambda can be
+        // retried when another thread wins the compare-and-set, and a retried counter increment would
+        // report one event twice.
+        val firstEventForArticle = meteredIds.add(articleId)
+        _metrics.update { current -> current.recording(interaction, firstEventForArticle) }
+        persistProfile()
         return true
+    }
+
+    /** Stores the current profile for the next launch. Best effort; see [ProfileStore.save]. */
+    private fun persistProfile() {
+        profileStore?.save(_uiState.value.interest)
     }
 
     /** Starts a refill if the buffer is low. Never blocks the caller. */

@@ -41,4 +41,14 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
         set(value) {
             preferences.edit().putBoolean(SettingsKeys.ONBOARDING_COMPLETED, value).apply()
         }
+
+    /**
+     * The profile is a few kilobytes of JSON, which apply() writes off the main thread along with
+     * the in-memory update, so recording an interaction stays a cheap call on the UI thread.
+     */
+    override var savedProfile: String?
+        get() = preferences.getString(SettingsKeys.INTEREST_PROFILE, null)
+        set(value) {
+            preferences.edit().putString(SettingsKeys.INTEREST_PROFILE, value).apply()
+        }
 }

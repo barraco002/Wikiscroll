@@ -20,9 +20,13 @@ import kotlin.time.Clock
  * not the page index staying constant.
  *
  * Two callbacks are exposed instead of one so the caller does not have to re-check the thresholds:
- * [onDwell] for stays at or above the dwell threshold, [onFastSwipe] for stays below the fast-swipe
- * threshold. Medium stays produce no event on purpose; the engine has nothing to learn from them
- * beyond the read itself, which the pager reports separately.
+ * [onDwell] for stays that reach the time the card needed, [onFastSwipe] for stays below half of it.
+ * Medium stays produce no event on purpose; the engine has nothing to learn from them beyond the
+ * read itself, which the pager reports separately.
+ *
+ * The thresholds are resolved against the card that was measured, which is why the report is
+ * classified here instead of inside [DwellSession]: the session knows the clock, the feed knows the
+ * content, and only the content can say what eight seconds means.
  *
  * The timing rules live in [DwellSession] rather than here so they stay testable without a
  * composition.
@@ -52,9 +56,18 @@ fun DwellTrackerEffect(
 
     fun dispatch(finished: DwellReport?) {
         if (finished == null) return
+        // The article list is append only, so the card that was measured is still in it. The
+        // fallback keeps the report usable if it ever is not: the default expectation is the
+        // estimate for the shortest readable card, not zero.
+        val measured = currentArticles.firstOrNull { article -> article.id == finished.articleId }
+        val report = if (measured == null) {
+            finished
+        } else {
+            finished.copy(expectedDurationMs = measured.expectedReadMs)
+        }
         when {
-            finished.isDwell -> currentOnDwell(finished.articleId, finished.durationMs)
-            finished.isFastSwipe -> currentOnFastSwipe(finished.articleId, finished.durationMs)
+            report.isDwell -> currentOnDwell(report.articleId, report.durationMs)
+            report.isFastSwipe -> currentOnFastSwipe(report.articleId, report.durationMs)
         }
     }
 

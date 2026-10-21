@@ -61,6 +61,11 @@ import com.github.terrakok.wikwok.domain.Reward
  * to model a boolean. The pager state lives outside [AnimatedContent], which is what makes returning
  * to the feed land on the same card instead of the first one.
  *
+ * The metrics panel is an overlay instead of a destination, because it is a look at the session
+ * rather than a place in it: it covers the feed, keeps the pager mounted underneath at the same
+ * index, and closes back onto the exact card the reader left. While it is open the dwell tracker is
+ * switched off, so time spent reading counters is not charged to the article behind them.
+ *
  * Likes are tracked locally because they are a presentation concern here: the engine only needs to
  * know that the event happened, and it does not echo a per-article flag back. Re-tapping an already
  * liked card replays the animation without recording a second event, which would otherwise inflate
@@ -82,13 +87,16 @@ fun WikiscrollScreen(
     // object rather than an unpacked value: the cards read it through their own derived state, so
     // one tap invalidates one button instead of the whole pager.
     val likedIds = viewModel.likedIds
+    val metrics by viewModel.metrics.collectAsStateWithLifecycle()
     var selectedArticle by remember { mutableStateOf<Article?>(null) }
+    var showMetrics by remember { mutableStateOf(false) }
 
-    // The detail page is a branch of this composable, not a navigation entry, so nothing else can
-    // pop it. Without this the Android back button finishes the activity: a reader who taps an
-    // article and presses back leaves the app instead of returning to the feed.
-    BackHandler(enabled = selectedArticle != null) {
-        selectedArticle = null
+    // Both destinations are branches of this composable, not navigation entries, so nothing else can
+    // pop them. Without this the Android back button finishes the activity: a reader who taps an
+    // article and presses back leaves the app instead of returning to the feed. The panel closes
+    // first, so one press never unwinds two surfaces.
+    BackHandler(enabled = selectedArticle != null || showMetrics) {
+        if (showMetrics) showMetrics = false else selectedArticle = null
     }
 
     // Hoisted out of the pager item so the callbacks keep one identity across recompositions. A
@@ -98,6 +106,7 @@ fun WikiscrollScreen(
     val onOpenArticle: (Article) -> Unit = remember {
         { article -> selectedArticle = article }
     }
+    val onOpenMetrics: () -> Unit = remember { { showMetrics = true } }
 
     LaunchedEffect(viewModel) {
         viewModel.start()
@@ -114,7 +123,7 @@ fun WikiscrollScreen(
         articles = uiState.articles,
         onDwell = viewModel::onDwellTime,
         onFastSwipe = viewModel::onFastSwipe,
-        active = selectedArticle == null,
+        active = selectedArticle == null && !showMetrics,
     )
 
     Box(
@@ -160,6 +169,7 @@ fun WikiscrollScreen(
                                     onLike = onLike,
                                     onOpen = onOpenArticle,
                                     onReadMore = viewModel::onReadMore,
+                                    onOpenMetrics = onOpenMetrics,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -183,6 +193,14 @@ fun WikiscrollScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+        }
+
+        if (showMetrics) {
+            MetricsScreen(
+                metrics = metrics,
+                onClose = { showMetrics = false },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

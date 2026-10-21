@@ -19,4 +19,20 @@ actual class PlatformSettingsStorage actual constructor() : SettingsStorage {
         set(value) {
             runCatching { localStorage.setItem(SettingsKeys.ONBOARDING_COMPLETED, value.toString()) }
         }
+
+    /**
+     * Same failure policy as the flag: an unreadable profile degrades to no profile, and a rejected
+     * write is dropped. A browser that refuses storage must not stop the feed from running.
+     */
+    override var savedProfile: String?
+        get() = runCatching { localStorage.getItem(SettingsKeys.INTEREST_PROFILE) }.getOrNull()
+        set(value) {
+            runCatching {
+                if (value == null) {
+                    localStorage.removeItem(SettingsKeys.INTEREST_PROFILE)
+                } else {
+                    localStorage.setItem(SettingsKeys.INTEREST_PROFILE, value)
+                }
+            }
+        }
 }

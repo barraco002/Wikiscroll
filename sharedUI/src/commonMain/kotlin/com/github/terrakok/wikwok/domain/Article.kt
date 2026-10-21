@@ -40,6 +40,24 @@ data class Article(
 ) {
 
     /**
+     * Time the reader needs to finish the text this card actually shows, in milliseconds.
+     *
+     * A duration means nothing on its own: eight seconds is a finished card when the extract is 150
+     * characters and a fast swipe when it is 900. The estimate converts a stopwatch reading into a
+     * fraction of the card, which is what the engine compares against.
+     *
+     * The character count is clamped at both ends on purpose. At the top because the card renders at
+     * most five lines of extract, roughly [MAX_VISIBLE_CHARS] characters on a phone: a 6,000
+     * character extract does not ask for four minutes of attention, and without the ceiling a long
+     * article would quietly stop producing dwell signals altogether. At the bottom because a short
+     * stub is still a card the reader has to parse, so it is never assumed readable in two seconds.
+     */
+    val expectedReadMs: Long
+        get() = extract.length
+            .coerceIn(MIN_VISIBLE_CHARS, MAX_VISIBLE_CHARS)
+            .toLong() * MILLIS_PER_SECOND / CHARS_PER_SECOND
+
+    /**
      * Articles reachable from this one through internal links.
      *
      * The engine treats this as the candidate set for the random walk. An empty list is a legal
@@ -62,4 +80,27 @@ data class Article(
      */
     override fun toString(): String =
         "Article(id=$id, title=$title, categories=$categories)"
+
+    companion object {
+
+        /** Reading speed the estimate assumes: 15 characters per second, about 200 words a minute. */
+        const val CHARS_PER_SECOND: Int = 15
+
+        /** Shortest extract the estimate will assume is on screen. */
+        const val MIN_VISIBLE_CHARS: Int = 240
+
+        /**
+         * Longest extract the estimate will assume is on screen.
+         *
+         * Five lines of body text on a phone is roughly this many characters. Past it the estimate
+         * saturates, because the card does not show more.
+         */
+        const val MAX_VISIBLE_CHARS: Int = 450
+
+        /** Estimate for the shortest readable card, used when a caller does not know the article. */
+        val DEFAULT_EXPECTED_READ_MS: Long = MIN_VISIBLE_CHARS.toLong() * MILLIS_PER_SECOND / CHARS_PER_SECOND
+    }
 }
+
+/** Milliseconds in one second, named so the reading estimate reads as arithmetic instead of magic. */
+private const val MILLIS_PER_SECOND: Long = 1_000L

@@ -32,13 +32,18 @@ class RecommendationEngine(
     /**
      * Applies [event] to [currentState] and returns the updated snapshot.
      *
-     * Scoring rules, matching the project README:
-     * - [InteractionEvent.DwellTime] with a duration of at least [MIN_DWELL_MS] adds
-     *   [SCORE_DWELL_POINTS];
-     * - [InteractionEvent.DwellTime] below [FAST_SWIPE_MS] scores nothing: a short stay is a
-     *   rejection signal, but it is a different event from a reported swipe and is not punished
-     *   twice;
-     * - [InteractionEvent.FastSwipe] with a duration below [FAST_SWIPE_MS] subtracts
+     * Scoring rules, matching the project README. Every duration is compared against the time the
+     * card needed (see [InteractionEvent.DwellTime.expectedDurationMs] and [ReadingPolicy]), never
+     * against a fixed number of seconds:
+     * - a stay that reaches the expected reading time adds [SCORE_DWELL_POINTS];
+     * - a stay that reaches twice the expected reading time adds [SCORE_DEEP_READ_POINTS], because
+     *   finishing a card and then reading it again is a stronger statement than finishing it;
+     * - a stay between half and the full expected time scores nothing: the reader left mid-card, and
+     *   that says nothing about the topic;
+     * - a stay below half the expected time is a rejection signal but scores nothing as a
+     *   [InteractionEvent.DwellTime]: it is a different event from a reported swipe and is not
+     *   punished twice;
+     * - [InteractionEvent.FastSwipe] below half the expected time subtracts
      *   [SCORE_FAST_SWIPE_POINTS];
      * - [InteractionEvent.LikeAction] adds [SCORE_LIKE_POINTS] and counts as a dwell.
      * - [InteractionEvent.ReadMore] adds [SCORE_READ_MORE_POINTS] and counts as a dwell. It costs
@@ -66,11 +71,22 @@ class RecommendationEngine(
         todayEpochDay: Long,
     ): InterestState {
         val delta = when (event) {
-            is InteractionEvent.DwellTime ->
-                if (event.durationMs >= MIN_DWELL_MS) SCORE_DWELL_POINTS else 0
+            is InteractionEvent.DwellTime -> when {
+                ReadingPolicy.isDeepRead(event.durationMs, event.expectedDurationMs) ->
+                    SCORE_DEEP_READ_POINTS
+
+                ReadingPolicy.isDwell(event.durationMs, event.expectedDurationMs) ->
+                    SCORE_DWELL_POINTS
+
+                else -> 0
+            }
 
             is InteractionEvent.FastSwipe ->
-                if (event.durationMs < FAST_SWIPE_MS) SCORE_FAST_SWIPE_POINTS else 0
+                if (ReadingPolicy.isFastSwipe(event.durationMs, event.expectedDurationMs)) {
+                    SCORE_FAST_SWIPE_POINTS
+                } else {
+                    0
+                }
 
             is InteractionEvent.LikeAction -> SCORE_LIKE_POINTS
 
@@ -79,13 +95,21 @@ class RecommendationEngine(
 
         val signal = when (event) {
             is InteractionEvent.DwellTime -> when {
-                event.durationMs >= MIN_DWELL_MS -> ReadingSignal.Dwell
-                event.durationMs < FAST_SWIPE_MS -> ReadingSignal.FastSwipe
+                ReadingPolicy.isDwell(event.durationMs, event.expectedDurationMs) ->
+                    ReadingSignal.Dwell
+
+                ReadingPolicy.isFastSwipe(event.durationMs, event.expectedDurationMs) ->
+                    ReadingSignal.FastSwipe
+
                 else -> null
             }
 
             is InteractionEvent.FastSwipe ->
-                if (event.durationMs < FAST_SWIPE_MS) ReadingSignal.FastSwipe else null
+                if (ReadingPolicy.isFastSwipe(event.durationMs, event.expectedDurationMs)) {
+                    ReadingSignal.FastSwipe
+                } else {
+                    null
+                }
 
             is InteractionEvent.LikeAction -> ReadingSignal.Dwell
 
@@ -121,7 +145,8 @@ class RecommendationEngine(
      * cannot blacklist a topic.
      */
     private fun InteractionEvent.isRejection(): Boolean =
-        this is InteractionEvent.FastSwipe && durationMs < FAST_SWIPE_MS
+        this is InteractionEvent.FastSwipe &&
+            ReadingPolicy.isFastSwipe(durationMs, expectedDurationMs)
 
     /**
      * Chooses the next card from [candidates].
@@ -304,14 +329,16 @@ class RecommendationEngine(
     }
 
     companion object {
-        /** Minimum dwell, in milliseconds, that counts as interest. */
-        const val MIN_DWELL_MS: Long = 8_000L
-
-        /** Maximum duration, in milliseconds, that counts as a rejection. */
-        const val FAST_SWIPE_MS: Long = 1_500L
-
-        /** Points added when the dwell threshold is cleared. */
+        /** Points added when a stay reaches the time the card needed. */
         const val SCORE_DWELL_POINTS: Int = 2
+
+        /**
+         * Points added when a stay reaches twice the time the card needed.
+         *
+         * One more than a plain dwell: the reader finished the card and stayed, which is the
+         * strongest passive signal the feed can observe. Only a like beats it, and only by three.
+         */
+        const val SCORE_DEEP_READ_POINTS: Int = 3
 
         /** Points removed when the rejection threshold is met. */
         const val SCORE_FAST_SWIPE_POINTS: Int = -1
@@ -328,7 +355,6 @@ class RecommendationEngine(
          */
         const val SCORE_READ_MORE_POINTS: Int = 10
 
-        /** Exploration rate for a balanced or empty session window. */
         /** Shortest extract, in characters, that still reads as an article instead of a stub. */
         const val MIN_EXTRACT_LENGTH: Int = 300
 
@@ -369,6 +395,7 @@ class RecommendationEngine(
          */
         const val AFFINITY_SCALE: Double = 20.0
 
+        /** Exploration rate for a balanced or empty session window. */
         const val NEUTRAL_EXPLORATION_RATE: Double = 0.30
 
         /**

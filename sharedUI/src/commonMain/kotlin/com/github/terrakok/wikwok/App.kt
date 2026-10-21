@@ -16,6 +16,7 @@ import coil3.compose.LocalPlatformContext
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import com.github.terrakok.wikwok.data.PlatformSettingsStorage
+import com.github.terrakok.wikwok.data.ProfileStore
 import com.github.terrakok.wikwok.data.SettingsStorage
 import com.github.terrakok.wikwok.data.imageCachePath
 import com.github.terrakok.wikwok.data.WikipediaRepositoryImpl
@@ -42,6 +43,10 @@ internal val LocalImageLoader = compositionLocalOf<ImageLoader> { error("ImageLo
  * point of the gate: seeding a profile that a first card was already chosen against would waste the
  * seed. The nullable list is the decision itself, so there is no second boolean to keep in sync.
  *
+ * The same store also holds the learned profile, through [ProfileStore]. Both live here rather than
+ * inside the view model so the state holder receives a dependency it can be tested without, and so
+ * one store instance serves the flag and the profile instead of two objects owning one file.
+ *
  * @param onThemeChanged invoked with the resolved dark-theme flag, wired by the platform entry point.
  */
 @Composable
@@ -52,6 +57,7 @@ fun App(
     val imageLoader = remember(context) { createImageLoader(context) }
     val repository = remember { WikipediaRepositoryImpl() }
     val settings: SettingsStorage = remember { PlatformSettingsStorage() }
+    val profileStore = remember(settings) { ProfileStore(settings) }
     var chosenTopics by remember {
         mutableStateOf<List<String>?>(if (settings.isOnboardingCompleted) emptyList() else null)
     }
@@ -68,7 +74,11 @@ fun App(
             )
         } else {
             val feedViewModel = viewModel(key = "wikiscroll-feed") {
-                WikiscrollViewModel(repository = repository, initialTopics = topics)
+                WikiscrollViewModel(
+                    repository = repository,
+                    initialTopics = topics,
+                    profileStore = profileStore,
+                )
             }
             WikiscrollScreen(
                 viewModel = feedViewModel,
