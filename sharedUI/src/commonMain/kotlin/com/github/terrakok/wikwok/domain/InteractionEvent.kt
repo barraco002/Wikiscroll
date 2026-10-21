@@ -59,4 +59,16 @@ sealed class InteractionEvent {
         override val articleId: String,
         override val categories: List<String>,
     ) : InteractionEvent()
+
+    /**
+     * The reader opened the full article from the card.
+     *
+     * The strongest signal the app can observe: the summary was not enough and the reader left the
+     * feed to keep reading. It outranks a like, which costs nothing, because this one costs
+     * attention.
+     */
+    data class ReadMore(
+        override val articleId: String,
+        override val categories: List<String>,
+    ) : InteractionEvent()
 }

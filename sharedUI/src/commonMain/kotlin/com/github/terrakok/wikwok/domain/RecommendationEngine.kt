@@ -41,6 +41,12 @@ class RecommendationEngine(
      * - [InteractionEvent.FastSwipe] with a duration below [FAST_SWIPE_MS] subtracts
      *   [SCORE_FAST_SWIPE_POINTS];
      * - [InteractionEvent.LikeAction] adds [SCORE_LIKE_POINTS] and counts as a dwell.
+     * - [InteractionEvent.ReadMore] adds [SCORE_READ_MORE_POINTS] and counts as a dwell. It costs
+     *   the reader attention instead of a tap, so it outranks a like.
+     *
+     * A fast swipe does more than score: it buries its categories for [REJECTION_TURNS] cards, so
+     * the next few picks are forced elsewhere. Every event also decays the existing penalties by
+     * one turn, which is what makes the block temporary.
      *
      * Out-of-range timings are not errors: they carry no scoring evidence, but the article is
      * still recorded as served so it cannot resurface later in the same session.
@@ -67,6 +73,8 @@ class RecommendationEngine(
                 if (event.durationMs < FAST_SWIPE_MS) SCORE_FAST_SWIPE_POINTS else 0
 
             is InteractionEvent.LikeAction -> SCORE_LIKE_POINTS
+
+            is InteractionEvent.ReadMore -> SCORE_READ_MORE_POINTS
         }
 
         val signal = when (event) {
@@ -80,13 +88,40 @@ class RecommendationEngine(
                 if (event.durationMs < FAST_SWIPE_MS) ReadingSignal.FastSwipe else null
 
             is InteractionEvent.LikeAction -> ReadingSignal.Dwell
+
+            is InteractionEvent.ReadMore -> ReadingSignal.Dwell
         }
 
-        return currentState
+        val buried = if (event.isRejection()) event.categories.distinct() else emptyList()
+
+        // The decay runs before the new penalty is written. Decaying afterwards would charge the
+        // penalty for the very card that created it, and a five-card block would only ever buy
+        // four.
+        val decayed = currentState.decayRejections()
+        val rejected = if (buried.isEmpty()) {
+            decayed
+        } else {
+            val merged = decayed.recentlyRejectedCategories.toMutableMap()
+            for (category in buried) {
+                merged[category] = REJECTION_TURNS
+            }
+            decayed.copy(recentlyRejectedCategories = merged)
+        }
+
+        return rejected
             .withScoreDelta(event.categories, delta)
             .withSignal(signal)
             .withServedArticle(event.articleId, event.categories, todayEpochDay)
     }
+
+    /**
+     * True when the event is a rejection strong enough to bury its categories.
+     *
+     * The duration is re-checked here rather than trusted, so a caller that mislabels a slow swipe
+     * cannot blacklist a topic.
+     */
+    private fun InteractionEvent.isRejection(): Boolean =
+        this is InteractionEvent.FastSwipe && durationMs < FAST_SWIPE_MS
 
     /**
      * Chooses the next card from [candidates].
@@ -106,15 +141,49 @@ class RecommendationEngine(
      * dominates without monopolising the feed. Preferred means an exact hit or a seeded topic found
      * inside a category name, which is how free-text interests from the onboarding take effect.
      *
-     * If neither arm finds a candidate, a uniform pick from the filtered pool is returned.
+     * Before either arm runs, two gates remove candidates:
      *
+     * 1. **Quality.** An article is dropped when its extract is shorter than [MIN_EXTRACT_LENGTH]
+     *    or it carries fewer than [MIN_CATEGORIES] categories. A stub cannot tell the reader
+     *    whether the topic is boring or the article is empty, so it is never shown. The ungated
+     *    pool is restored when the gate would empty the feed.
+     * 2. **Anti-boredom.** A candidate sitting in a rejected category is dropped until its penalty
+     *    expires. Same restore rule: an empty feed is a worse outcome than a repeated topic.
+     *
+     * Both arms sample with [retentionWeight], the product of the interest affinity, the narrative
+     * pathing bonus and the authority multiplier. If neither arm finds a candidate, the filtered
+     * pool is sampled the same way.
+     *
+     * @param candidates the neighbourhood to pick from.
+     * @param currentState everything the policy has learned so far.
+     * @param currentArticle the card being left, used for narrative pathing. Null disables the
+     *   pathing multipliers and leaves affinity and authority in charge.
      * @return the chosen article, or null when [candidates] is empty.
      */
-    fun nextArticle(candidates: List<Article>, currentState: InterestState): Article? {
+    fun nextArticle(
+        candidates: List<Article>,
+        currentState: InterestState,
+        currentArticle: Article? = null,
+    ): Article? {
         if (candidates.isEmpty()) return null
 
         val fresh = candidates.filterNot { currentState.isInSession(it.id) }
-        val pool = fresh.ifEmpty { candidates }
+        val sessionPool = fresh.ifEmpty { candidates }
+
+        // Quality gate. A three-word extract is a stub, not a card: the reader cannot tell whether
+        // the topic is boring or the article is empty, so the only safe ranking is to drop it.
+        val readable = sessionPool.filter { candidate -> candidate.isFeedWorthy() }
+        val qualityPool = readable.ifEmpty { sessionPool }
+
+        // Anti-boredom gate. A topic the reader swiped past is dead for a few cards.
+        val allowed = qualityPool.filterNot { candidate ->
+            candidate.categories.any { category -> currentState.isRejected(category) }
+        }
+
+        // Falling back to the buried pool beats returning null: null sends the caller to the
+        // network for a replacement, which is a slower card, not a more varied one.
+        val pool = allowed.ifEmpty { qualityPool }
+        val currentCategories = currentArticle?.categories?.toSet().orEmpty()
 
         val exploring = random.nextDouble() < currentState.explorationRate
 
@@ -123,8 +192,9 @@ class RecommendationEngine(
                 candidate.categories.any { currentState.isUnexplored(it) }
             }
             if (unexplored.isNotEmpty()) {
-                // Every unexplored category scores zero, so the weights are uniform by definition.
-                return unexplored.weightedPick { UNEXPLORED_WEIGHT }
+                return unexplored.weightedPick { candidate ->
+                    candidate.retentionWeight(currentState, currentCategories)
+                }
             }
         }
 
@@ -133,11 +203,15 @@ class RecommendationEngine(
                 candidate.categories.any { currentState.isPreferred(it) }
             }
             if (relevant.isNotEmpty()) {
-                return relevant.weightedPick { candidate -> candidate.interestWeight(currentState) }
+                return relevant.weightedPick { candidate ->
+                    candidate.retentionWeight(currentState, currentCategories)
+                }
             }
         }
 
-        return pool[random.nextInt(pool.size)]
+        return pool.weightedPick { candidate ->
+            candidate.retentionWeight(currentState, currentCategories)
+        }
     }
 
     /**
@@ -172,9 +246,58 @@ class RecommendationEngine(
         return last()
     }
 
-    /** Combined interest score of this candidate, floored at one so weights stay positive. */
-    private fun Article.interestWeight(state: InterestState): Double =
-        state.matchScore(categories).coerceAtLeast(1).toDouble()
+    /**
+     * True when the article carries enough substance to hold a full-screen card.
+     *
+     * Both limits are deliberately low. They are not a quality ideal, they are the line below
+     * which a card is provably empty: an extract too short to read, and a page with no category to
+     * route from.
+     */
+    private fun Article.isFeedWorthy(): Boolean =
+        extract.length >= MIN_EXTRACT_LENGTH && categories.size >= MIN_CATEGORIES
+
+    /**
+     * Relative priority of one candidate under the retention policy.
+     *
+     * Three independent opinions, multiplied:
+     *
+     * - **Affinity** from [InterestState.matchScore], normalised into 1.0 to 2.0 so a heavily
+     *   liked topic cannot drown the other two signals. Without the normalisation, ten likes on one
+     *   category would outrank every narrative edge on the board.
+     * - **Narrative pathing.** Two shared categories is a story the reader is already inside
+     *   ("World War II" to "Adolf Hitler" to "Nazi Germany"), worth [NARRATIVE_BONUS]. No shared
+     *   category is a topic change, and is charged [NARRATIVE_PENALTY] for it.
+     * - **Authority.** A landmark article is a better next step than an obscure neighbour even
+     *   when both match, worth [AUTHORITY_BONUS].
+     *
+     * @param currentCategories categories of the card being left, empty when there is no origin.
+     */
+    private fun Article.retentionWeight(
+        state: InterestState,
+        currentCategories: Set<String>,
+    ): Double {
+        var weight = BASE_WEIGHT
+
+        val affinity = state.matchScore(categories)
+        if (affinity > 0) {
+            weight *= 1.0 + affinity / (affinity + AFFINITY_SCALE)
+        }
+
+        if (currentCategories.isNotEmpty()) {
+            val shared = categories.count { category -> category in currentCategories }
+            weight *= when {
+                shared >= NARRATIVE_SHARED_CATEGORIES -> NARRATIVE_BONUS
+                shared == 0 -> NARRATIVE_PENALTY
+                else -> 1.0
+            }
+        }
+
+        if (isPopular) {
+            weight *= AUTHORITY_BONUS
+        }
+
+        return weight
+    }
 
     companion object {
         /** Minimum dwell, in milliseconds, that counts as interest. */
@@ -192,7 +315,48 @@ class RecommendationEngine(
         /** Points added by an explicit like. */
         const val SCORE_LIKE_POINTS: Int = 5
 
+        /**
+         * Points awarded by [InteractionEvent.ReadMore].
+         *
+         * Twice a like. Tapping like costs nothing; opening the article costs a decision to leave
+         * the feed, which is the strongest statement a reader can make about a topic without
+         * typing.
+         */
+        const val SCORE_READ_MORE_POINTS: Int = 10
+
         /** Exploration rate for a balanced or empty session window. */
+        /** Shortest extract, in characters, that still reads as an article instead of a stub. */
+        const val MIN_EXTRACT_LENGTH: Int = 300
+
+        /** Fewest categories a candidate needs for the narrative signal to mean anything. */
+        const val MIN_CATEGORIES: Int = 2
+
+        /** Cards a category stays buried after a rejection. */
+        const val REJECTION_TURNS: Int = 5
+
+        /** Weight every candidate starts from, before any multiplier applies. */
+        const val BASE_WEIGHT: Double = 1.0
+
+        /** Multiplier when a candidate continues the current article's topic. */
+        const val NARRATIVE_BONUS: Double = 2.5
+
+        /** Multiplier when a candidate changes topic entirely. */
+        const val NARRATIVE_PENALTY: Double = 0.5
+
+        /** Shared categories needed to count as the same narrative thread. */
+        const val NARRATIVE_SHARED_CATEGORIES: Int = 2
+
+        /** Multiplier for an article that appears in the most viewed ranking. */
+        const val AUTHORITY_BONUS: Double = 2.0
+
+        /**
+         * Affinity score at which the interest multiplier reaches 1.5.
+         *
+         * Chosen so the whole affinity term spans 1.0 to 2.0: the same order as [AUTHORITY_BONUS],
+         * which is what keeps the three multipliers negotiating instead of one of them deciding.
+         */
+        const val AFFINITY_SCALE: Double = 20.0
+
         const val NEUTRAL_EXPLORATION_RATE: Double = 0.30
 
         /**

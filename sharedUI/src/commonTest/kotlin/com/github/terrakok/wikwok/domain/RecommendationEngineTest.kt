@@ -217,5 +217,129 @@ class RecommendationEngineTest {
         assertTrue(picked != null, "the feed must not go empty when every candidate was already served")
     }
 
+    // region Retention mechanics
+
+    /** Extract long enough to clear the quality gate. */
+    private val feedExtract: String = "A".repeat(RecommendationEngine.MIN_EXTRACT_LENGTH + 40)
+
+    private fun card(
+        id: String,
+        categories: List<String>,
+        isPopular: Boolean = false,
+    ) = Article(
+        id = id,
+        title = id,
+        categories = categories,
+        extract = feedExtract,
+        isPopular = isPopular,
+    )
+
+    @Test
+    fun stubArticlesAreFilteredOut() {
+        val stub = Article("en:stub", "Stub", listOf("History", "Europe"), extract = "Too short")
+        val solid = card("en:solid", listOf("History", "Europe"))
+
+        val picked = engine().nextArticle(listOf(stub, solid), InterestState())
+
+        assertEquals("en:solid", picked?.id, "an extract too short to read is not a card")
+    }
+
+    @Test
+    fun articlesWithASingleCategoryAreFilteredOut() {
+        val thin = card("en:thin", listOf("History"))
+        val solid = card("en:solid", listOf("History", "Europe"))
+
+        assertEquals("en:solid", engine().nextArticle(listOf(thin, solid), InterestState())?.id)
+    }
+
+    @Test
+    fun fastSwipeBuriesCategory() {
+        val engine = engine()
+        val rejected = engine.processEvent(
+            event = swipe("en:1", listOf("Football"), 400L),
+            currentState = InterestState(),
+            todayEpochDay = 1L,
+        )
+
+        assertTrue(rejected.isRejected("Football"), "a fast swipe must bury the topic")
+        assertEquals(
+            RecommendationEngine.REJECTION_TURNS,
+            rejected.recentlyRejectedCategories["Football"],
+            "the penalty must not be decayed by the event that created it",
+        )
+
+        val buried = card("en:2", listOf("Football", "Sport"))
+        val other = card("en:3", listOf("Astronomy", "Spaceflight"))
+
+        repeat(50) {
+            assertEquals(
+                "en:3",
+                engine.nextArticle(listOf(buried, other), rejected)?.id,
+                "a buried category must not return while the penalty lasts",
+            )
+        }
+    }
+
+    @Test
+    fun rejectionExpiresAfterThePenaltyTurns() {
+        val engine = engine()
+        var state = engine.processEvent(swipe("en:1", listOf("Football"), 400L), InterestState(), 1L)
+
+        repeat(RecommendationEngine.REJECTION_TURNS) {
+            state = engine.processEvent(dwell("en:9", listOf("Other"), 9_000L), state, 2L)
+        }
+
+        assertTrue(state.recentlyRejectedCategories.isEmpty(), "the block has to expire")
+    }
+
+    @Test
+    fun popularArticlesGetABoost() {
+        val engine = engine(11L)
+        val plain = card("en:plain", listOf("History", "Europe"))
+        val landmark = card("en:landmark", listOf("History", "Europe"), isPopular = true)
+
+        var landmarkWins = 0
+        repeat(2_000) {
+            if (engine.nextArticle(listOf(plain, landmark), InterestState())?.id == "en:landmark") {
+                landmarkWins++
+            }
+        }
+
+        // 2.0 against 1.0 is a two-to-one split; the tolerance leaves room for the exploration arm.
+        assertTrue(landmarkWins > 1_100, "authority must win a category tie, got $landmarkWins of 2000")
+    }
+
+    @Test
+    fun sharedCategoriesIncreasePriority() {
+        val engine = engine(13L)
+        val origin = card("en:0", listOf("World War II", "Nazi Germany", "Adolf Hitler"))
+        val sameThread = card("en:1", listOf("World War II", "Nazi Germany"))
+        val tangent = card("en:2", listOf("Astronomy", "Spaceflight"))
+
+        var threadWins = 0
+        repeat(2_000) {
+            val picked = engine.nextArticle(listOf(sameThread, tangent), InterestState(), origin)
+            if (picked?.id == "en:1") threadWins++
+        }
+
+        // 2.5 against 0.5 is five to one.
+        assertTrue(threadWins > 1_500, "the shared thread must dominate, got $threadWins of 2000")
+    }
+
+    @Test
+    fun readMoreOutranksALike() {
+        val engine = engine()
+
+        val liked = engine.processEvent(like("en:1", listOf("History")), InterestState(), 1L)
+        val read = engine.processEvent(
+            event = InteractionEvent.ReadMore("en:2", listOf("History")),
+            currentState = InterestState(),
+            todayEpochDay = 1L,
+        )
+
+        assertEquals(RecommendationEngine.SCORE_LIKE_POINTS, liked.scoreOf("History"))
+        assertEquals(RecommendationEngine.SCORE_READ_MORE_POINTS, read.scoreOf("History"))
+    }
+
     // endregion
 }

@@ -15,6 +15,9 @@ import androidx.compose.runtime.Immutable
  * @property extract plain text summary. May be empty when the API returns no introduction.
  * @property imageUrl lead image URL, or null when the article has no thumbnail. Off-screen sizes
  *   are not requested: the card crops whatever the API offers.
+ * @property isPopular true when the article appears in the day's most viewed ranking. The engine
+ *   reads it as an authority signal: a landmark article is a better next step than an obscure
+ *   neighbour, even when both match the reader's interests.
  * @property neighboursProvider lazy edge source. Kept as a provider instead of an eager list so a
  * cyclic graph can be built without allocating the whole component up front.
  *
@@ -32,6 +35,7 @@ data class Article(
     val categories: List<String>,
     val extract: String = "",
     val imageUrl: String? = null,
+    val isPopular: Boolean = false,
     private val neighboursProvider: () -> List<Article> = { emptyList() },
 ) {
 

@@ -8,6 +8,7 @@ import com.github.terrakok.wikwok.domain.InteractionEvent
 import com.github.terrakok.wikwok.domain.InteractionEvent.DwellTime
 import com.github.terrakok.wikwok.domain.InteractionEvent.FastSwipe
 import com.github.terrakok.wikwok.domain.InteractionEvent.LikeAction
+import com.github.terrakok.wikwok.domain.InteractionEvent.ReadMore
 import com.github.terrakok.wikwok.domain.InterestState
 import com.github.terrakok.wikwok.domain.RecommendationEngine
 import com.github.terrakok.wikwok.domain.Reward
@@ -143,6 +144,16 @@ class WikiscrollViewModel(
     }
 
     /**
+     * Records that the reader opened the full article.
+     *
+     * Emitted before the browser opens: the process can be backgrounded by the deeplink, and an
+     * event queued after that may never run.
+     */
+    fun onReadMore(articleId: String) {
+        recordEvent(articleId) { article -> ReadMore(article.id, article.categories) }
+    }
+
+    /**
      * Installs the topics chosen in the onboarding as the opening profile.
      *
      * This is the cold start fix. Without it the first cards are decided by an empty profile, so the
@@ -225,12 +236,16 @@ class WikiscrollViewModel(
     private suspend fun loadNext(): Boolean {
         val state = _uiState.value
         val buffered = state.articles.mapTo(mutableSetOf()) { article -> article.id }
-        val candidates = state.articles.lastOrNull()
+        // The card the candidate set was built from, which is also the one the narrative pathing
+        // has to continue: ranking neighbours against a card the reader is not looking at would
+        // route the story through the wrong thread.
+        val origin = state.articles.lastOrNull()
+        val candidates = origin
             ?.neighbours()
             .orEmpty()
             .filter { candidate -> candidate.id !in buffered }
 
-        val picked = engine.nextArticle(candidates, state.interest)
+        val picked = engine.nextArticle(candidates, state.interest, origin)
         val result = if (picked == null) {
             repository.getPopularArticle(language)
         } else {

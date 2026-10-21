@@ -155,6 +155,7 @@ fun WikiscrollScreen(
                                     likedIds = likedIds,
                                     onLike = onLike,
                                     onOpen = onOpenArticle,
+                                    onReadMore = viewModel::onReadMore,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }

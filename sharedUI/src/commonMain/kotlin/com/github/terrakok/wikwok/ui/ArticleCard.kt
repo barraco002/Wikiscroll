@@ -79,6 +79,9 @@ import kotlin.math.sin
  * @param likedIds every article already in the reader's likes.
  * @param onLike invoked with the article id on every tap, like and unlike alike.
  * @param onOpen invoked with the article the reader asked to read in full.
+ * @param onReadMore invoked with the article id when the reader asks for the full text, before the
+ *   link is opened. It exists separately from [onOpen] because it is the strongest retention
+ *   signal the app can record and must reach the policy even when the browser fails to launch.
  * @param modifier applied to the outermost box.
  */
 @Composable
@@ -87,6 +90,7 @@ fun ArticleCard(
     likedIds: State<Set<String>>,
     onLike: (String) -> Unit,
     onOpen: (Article) -> Unit,
+    onReadMore: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Keyed on the id so a recycled page does not inherit the previous article's derived state.
@@ -97,6 +101,7 @@ fun ArticleCard(
     // and would defeat the skipping the immutable article makes possible.
     val onLikeClick = remember(article.id, onLike) { { onLike(article.id) } }
     val onOpenClick = remember(article, onOpen) { { onOpen(article) } }
+    val onReadMoreClick = remember(article.id, onReadMore) { { onReadMore(article.id) } }
 
     Box(
         modifier = modifier
@@ -177,7 +182,12 @@ fun ArticleCard(
             Box(
                 modifier = Modifier
                     .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(percent = 50))
-                    .clickable(role = Role.Button, onClick = onOpenClick)
+                    .clickable(role = Role.Button) {
+                        // Recorded before the deeplink: opening the browser can background the
+                        // process, and an event queued after that may never run.
+                        onReadMoreClick()
+                        onOpenClick()
+                    }
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Text(

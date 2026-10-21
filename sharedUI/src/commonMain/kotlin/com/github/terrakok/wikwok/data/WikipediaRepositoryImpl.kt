@@ -48,6 +48,15 @@ class WikipediaRepositoryImpl(
     private val cacheMutex: Mutex = Mutex()
 
     /**
+     * The day's most viewed titles per language, kept for the length of the session.
+     *
+     * Resolved once and reused for two purposes: choosing the seed article and flagging related
+     * articles that happen to be landmarks. A stale entry only costs a slightly old notion of
+     * "popular", never correctness.
+     */
+    private val popularTitleCache: MutableMap<String, List<String>> = mutableMapOf()
+
+    /**
      * Loads an article and attaches its neighbourhood in the same call.
      *
      * Neighbour resolution is best effort. A feed entry with no edges is still readable, so a
@@ -62,8 +71,13 @@ class WikipediaRepositoryImpl(
 
         val base = page.toArticle(language) ?: throw WikipediaException("Page for $id has no id")
 
-        val neighbours = runCatching { relatedOf(language, base.id) }.getOrDefault(emptyList())
-        val article = base.withNeighbours { neighbours }
+        // Read-only lookup. Fetching the ranking belongs to the seed call, never to a card load:
+        // a swipe costs three requests and this is not allowed to make it four.
+        val popular = cachedPopularTitlesOrEmpty(language)
+        val neighbours = runCatching { relatedOf(language, base.id) }
+            .getOrDefault(emptyList())
+            .map { neighbour -> neighbour.markedPopular(popular) }
+        val article = base.markedPopular(popular).withNeighbours { neighbours }
 
         cacheMutex.withLock {
             articleCache[key] = article
@@ -90,7 +104,7 @@ s most viewed articles and attaches its neighbourhood.
      * neighbourhood and shares the cache with every other path into the feed.
      */
     override suspend fun getPopularArticle(language: String): Result<Article> = runCatching {
-        val title = popularTitles(language).random(random)
+        val title = cachedPopularTitles(language).random(random)
         getArticle(language, title).getOrThrow()
     }
 
@@ -104,6 +118,26 @@ s most viewed articles and attaches its neighbourhood.
      *
      * @throws WikipediaException when the ranking is empty or the request failed.
      */
+    /**
+     * The ranked titles for [language], computed once per session.
+     *
+     * The ranking feeds two call sites, and each of them runs on every swipe, so the network cost
+     * of the list belongs to the first call and not to the hundredth. A failure is not cached:
+     * the next swipe is allowed to retry.
+     */
+    /** The already resolved ranking for [language], or an empty list when none was fetched yet. */
+    private suspend fun cachedPopularTitlesOrEmpty(language: String): List<String> =
+        cacheMutex.withLock { popularTitleCache[language] }.orEmpty()
+
+    private suspend fun cachedPopularTitles(language: String): List<String> {
+        cacheMutex.withLock { popularTitleCache[language] }?.let { cached -> return cached }
+
+        val titles = popularTitles(language)
+
+        cacheMutex.withLock { popularTitleCache[language] = titles }
+        return titles
+    }
+
     private suspend fun popularTitles(language: String): List<String> {
         val response = queryPages(language) {
             parameter("action", "query")
@@ -300,3 +334,15 @@ internal fun parsePageId(id: String): String? {
     val tail = id.substringAfterLast(':')
     return tail.takeIf { candidate -> candidate.isNotEmpty() && candidate.all { it.isDigit() } }
 }
+
+/**
+ * Flags an article whose title appears in the day's most viewed ranking.
+ *
+ * Matched by title rather than by id because the ranking endpoint returns titles and no page ids.
+ * A title that is already flagged is returned untouched, and an article that does not match keeps
+ * its existing value, so this is safe to run over a list that is already annotated.
+ *
+ * @param popular titles from the most viewed ranking of the article's own language.
+ */
+private fun Article.markedPopular(popular: List<String>): Article =
+    if (isPopular || title !in popular) this else copy(isPopular = true)

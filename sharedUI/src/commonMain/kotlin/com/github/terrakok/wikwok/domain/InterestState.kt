@@ -28,6 +28,9 @@ enum class ReadingSignal {
  * @property seenCategories every category ever served, used by the exploration arm.
  * @property articlesRead number of cards served, drives the variable-ratio reward schedule.
  * @property streak consecutive-day reading streak.
+ * @property recentlyRejectedCategories categories the reader swiped past, mapped to the number of
+ *   cards still to be served before the topic is allowed back. A category absent from the map is
+ *   not punished; a value of zero has the same meaning.
  * @property recentSignals the last [SIGNAL_WINDOW] outcomes, oldest first. Drives
  * [explorationRate] and is deliberately separate from [sessionHistory]: the history answers what
  * was shown, this answers how it went.
@@ -38,8 +41,31 @@ data class InterestState(
     val seenCategories: Set<String> = emptySet(),
     val articlesRead: Int = 0,
     val streak: Streak = Streak(),
+    val recentlyRejectedCategories: Map<String, Int> = emptyMap(),
     val recentSignals: List<ReadingSignal> = emptyList(),
 ) {
+
+    /** True while [category] is still buried by the anti-boredom penalty. */
+    fun isRejected(category: String): Boolean =
+        (recentlyRejectedCategories[category] ?: 0) > 0
+
+    /**
+     * Advances the penalty clock by one served card.
+     *
+     * Every punished category loses one turn, which is what makes the block temporary instead of a
+     * permanent ban. Entries that reach zero are dropped rather than kept at zero, so the map
+     * cannot grow for the length of the session.
+     */
+    fun decayRejections(): InterestState {
+        if (recentlyRejectedCategories.isEmpty()) return this
+
+        val next = buildMap {
+            for ((category, turns) in recentlyRejectedCategories) {
+                if (turns > 1) put(category, turns - 1)
+            }
+        }
+        return copy(recentlyRejectedCategories = next)
+    }
 
     /** Current score for [category], or zero when the category was never seen. */
     fun scoreOf(category: String): Int = userInterestScores[category] ?: 0
