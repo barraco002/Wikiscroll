@@ -71,9 +71,9 @@ permission beyond `INTERNET`.
 
 ## Status
 
-The Android target is the one that ships. The desktop, web and iOS targets compile from the same
-source but have not been through a device pass yet, and the release APK is a sideload build rather
-than a store submission.
+The Android target is the one that ships, and the only one CI builds end to end. The desktop and web
+targets are compiled on every push; the iOS targets are declared in the Gradle build but have not been
+compiled or run yet. The release APK is a sideload build rather than a store submission.
 
 ## License
 
