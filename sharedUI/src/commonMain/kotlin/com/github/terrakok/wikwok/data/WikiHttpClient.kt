@@ -22,7 +22,7 @@ import kotlinx.serialization.json.Json
  * the transport contract rather than a nicety.
  */
 const val WIKISCROLL_USER_AGENT: String =
-    "Wikiscroll/1.4.0 (+https://github.com/barraco002/Wikiscroll)"
+    "Wikiscroll/1.5.0 (+https://github.com/barraco002/Wikiscroll)"
 
 /**
  * JSON configuration shared by every request.

@@ -35,7 +35,7 @@ collapsing into whatever you liked last week.
   before it competes, and a fast swipe buries its categories for five cards. Wikipedia is full of
   one-line disambiguation pages; a feed that serves them teaches the reader to swipe blind.
 - **Deterministic by construction.** The engine takes its randomness from an injected seed, so a
-  probabilistic assertion either always passes or always fails. 101 unit tests across 12 suites, and
+  probabilistic assertion either always passes or always fails. 104 unit tests across 13 suites, and
   flakiness stays a bug instead of becoming background noise.
 - **Network discipline.** A swipe costs three requests, never an N+1 fan-out. Server errors retry twice
   with exponential backoff capped at four seconds; timeouts are deliberately not retried, so a dead

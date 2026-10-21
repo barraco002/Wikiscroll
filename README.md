@@ -192,7 +192,7 @@ Background research and the full task breakdown live in [docs/RESEARCH.md](docs/
 - [x] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article, onboarding with interest seeding, most-viewed cold start.
 - [ ] **Phase 4 - Persistence and polish.** Interest vector in KStore, offline cache, accessibility pass.
 
-Contributions are welcome: the domain layer has a stable contract and 101 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.
+Contributions are welcome: the domain layer has a stable contract and 104 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.
 
 Two ground rules for pull requests. Every behavioural change needs a test that fails without it. Any change to the event weights or the payout table needs a short note in the pull request explaining the expected effect on reading time.
 
