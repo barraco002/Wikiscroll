@@ -11,7 +11,6 @@ plugins {
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.android.kmp.library)
     alias(libs.plugins.kotlinx.serialization)
-    alias(libs.plugins.ksp)
 }
 
 kotlin {
@@ -49,11 +48,9 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodel)
             implementation(libs.androidx.lifecycle.runtime)
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinInject)
             implementation(libs.coil)
             implementation(libs.coil.network.ktor)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.kermit)
         }
 
         commonTest.dependencies {
@@ -95,16 +92,6 @@ kotlin {
 
 dependencies {
     androidRuntimeClasspath(libs.compose.ui.tooling)
-}
-
-dependencies {
-    with(libs.kotlinInjectKsp) {
-        add("kspAndroid", this)
-        add("kspJvm", this)
-        add("kspWasmJs", this)
-        add("kspIosArm64", this)
-        add("kspIosSimulatorArm64", this)
-    }
 }
 
 compose.resources {
