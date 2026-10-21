@@ -216,8 +216,9 @@ class WikiscrollViewModel(
      * Loads one more article into the window.
      *
      * The candidates are the edges of the last loaded article, minus anything already buffered.
-     * When the engine has nothing to offer, or the article is a dead end, a random article keeps
-     * the feed alive: an infinite feed that stops because a page has no links is not infinite.
+     * When the engine has nothing to offer, or the article is a dead end, one of the day's most
+     * viewed articles keeps the feed alive: an infinite feed that stops because a page has no links
+     * is not infinite, and a random stub in that slot is worse than no card at all.
      *
      * @return true when an article was appended, false when the attempt failed or produced nothing.
      */
@@ -231,7 +232,7 @@ class WikiscrollViewModel(
 
         val picked = engine.nextArticle(candidates, state.interest)
         val result = if (picked == null) {
-            repository.getRandomArticle(language)
+            repository.getPopularArticle(language)
         } else {
             repository.getArticle(language, picked.id)
         }

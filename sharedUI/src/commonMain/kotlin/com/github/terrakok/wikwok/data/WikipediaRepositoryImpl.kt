@@ -77,32 +77,54 @@ class WikipediaRepositoryImpl(
         runCatching { relatedOf(language, currentArticleId) }
 
     /**
-     * Seeds the feed with an arbitrary article.
+     * Loads one of the day
+'
+s most viewed articles and attaches its neighbourhood.
      *
-     * A single request: the random generator feeds the same property set the feed renders, so the
-     * article and its metadata arrive together. The neighbourhood is resolved afterwards, exactly
-     * as in [getArticle], because the engine needs edges before the first swipe.
+     * This is the seed for a cold start and the way out of a dead end, so the candidate comes
+     * from the most viewed ranking instead of a uniform random draw. A uniform draw over a whole
+     * wiki lands on a stub most of the time: a surname, a village, a 1956 census district. The
+     * draw stays uniform inside the ranking, so two launches do not open on the same page.
+     *
+     * The second step is a plain [getArticle] call, so the article arrives with its
+     * neighbourhood and shares the cache with every other path into the feed.
      */
-    override suspend fun getRandomArticle(language: String): Result<Article> = runCatching {
-        val page = queryPages(language) {
+    override suspend fun getPopularArticle(language: String): Result<Article> = runCatching {
+        val title = popularTitles(language).random(random)
+        getArticle(language, title).getOrThrow()
+    }
+
+    /**
+     * Titles of the most viewed articles of the last 24 hours.
+     *
+     * Wikimedia serves the ranking from the same Action API as everything else, so no second
+     * host and no date arithmetic are involved. Two filters keep the result readable: only
+     * namespace zero, which drops portals, categories and help pages, and the local main page,
+     * which is always first and is never worth a card.
+     *
+     * @throws WikipediaException when the ranking is empty or the request failed.
+     */
+    private suspend fun popularTitles(language: String): List<String> {
+        val response = queryPages(language) {
             parameter("action", "query")
             parameter("format", "json")
             parameter("formatversion", 2)
-            parameter("generator", "random")
-            parameter("grnnamespace", 0)
-            parameter("grnlimit", 1)
-            parameter("prop", "extracts|categories|pageimages")
-            parameter("pithumbsize", THUMBNAIL_WIDTH)
-            parameter("exintro", true)
-            parameter("explaintext", true)
-            parameter("exlimit", "max")
-        }.firstPage() ?: throw WikipediaException("Random lookup returned no page")
+            parameter("list", "mostviewed")
+            parameter("pvimlimit", MOST_VIEWED_LIMIT)
+        }
 
-        val base = page.toArticle(language) ?: throw WikipediaException("Random page has no id")
+        val titles = response.query?.mostviewed
+            .orEmpty()
+            .filter { entry -> entry.ns == ArticleNamespace }
+            .map { entry -> entry.title }
+            .filterNot { title -> title in MainPageTitles }
+            .take(POPULAR_SAMPLE)
 
-        val neighbours = runCatching { relatedOf(language, base.id) }.getOrDefault(emptyList())
+        if (titles.isEmpty()) {
+            throw WikipediaException("Most viewed articles are unavailable for " + language)
+        }
 
-        base.withNeighbours { neighbours }
+        return titles
     }
 
     /**
@@ -244,6 +266,27 @@ class WikipediaRepositoryImpl(
          * comes back at its own width, so the request never invents detail.
          */
         const val THUMBNAIL_WIDTH: Int = 1080
+
+        /** How many of the day's most viewed articles enter the draw. */
+        const val POPULAR_SAMPLE: Int = 40
+
+        /** How many entries the ranking request asks for. */
+        const val MOST_VIEWED_LIMIT: Int = 50
+
+        /** Namespace id of a real article. Everything else is infrastructure. */
+        private const val ArticleNamespace: Int = 0
+
+        /**
+         * Main page titles across the editions the feed ships with.
+         *
+         * The ranking puts the local main page first and it lives in namespace zero, so the
+         * namespace filter cannot drop it. The list is short on purpose: an edition that is not
+         * here shows its main page once, which costs one card and no correctness.
+         */
+        private val MainPageTitles: Set<String> = setOf(
+            "Main Page", "Portada", "Página principal", "Hauptseite", "Accueil", "Pagina principal",
+            "メインページ", "Hoofdpagina", "Strona główna", "Главная страница"
+        )
     }
 }
 

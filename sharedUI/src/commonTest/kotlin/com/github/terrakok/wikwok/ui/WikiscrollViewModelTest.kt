@@ -62,7 +62,7 @@ class WikiscrollViewModelTest {
             return Result.success(articleOf(1).neighbours())
         }
 
-        override suspend fun getRandomArticle(language: String): Result<Article> {
+        override suspend fun getPopularArticle(language: String): Result<Article> {
             calls++
             if (failures > 0) {
                 failures--

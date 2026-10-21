@@ -40,6 +40,20 @@ data class WikiQuery(
     val pages: List<WikiPage> = emptyList(),
     val normalized: List<WikiTitleMapping> = emptyList(),
     val redirects: List<WikiTitleMapping> = emptyList(),
+    val mostviewed: List<WikiMostViewedEntry> = emptyList(),
+)
+
+/**
+ * One entry of the most viewed ranking.
+ *
+ * [ns] is the namespace id, and only zero is an article: everything else is a portal, a category
+ * or a special page. [count] is the number of views in the last 24 hours.
+ */
+@Serializable
+data class WikiMostViewedEntry(
+    val ns: Int = -1,
+    val title: String = "",
+    val count: Long = 0,
 )
 
 /**

@@ -36,15 +36,17 @@ interface WikipediaRepository {
     suspend fun getRelatedArticles(language: String, currentArticleId: String): Result<List<Article>>
 
     /**
-     * Loads an arbitrary article from the language edition.
+     * Loads one of the day's most viewed articles from the language edition.
      *
-     * Used once, to seed the feed when there is no reading history to walk from. The result is a
-     * complete article with its neighbourhood already attached, exactly like [getArticle].
+     * Used once, to seed the feed when there is no reading history to walk from, and again whenever
+     * the link graph runs out. Picking uniformly at random instead produced stubs: a surname, a
+     * village, a 1956 census district. The daily ranking is the cheapest proxy for "worth reading"
+     * that Wikipedia publishes, and it exists for every language edition.
      *
      * @param language wiki language code.
-     * @return the article on success, or a failure when the request could not be completed.
+     * @return the article on success, or a failure when the ranking or the article is unavailable.
      */
-    suspend fun getRandomArticle(language: String): Result<Article>
+    suspend fun getPopularArticle(language: String): Result<Article>
 
     companion object {
         /** Upper bound on how many links are expanded into articles per call. */
