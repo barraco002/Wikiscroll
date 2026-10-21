@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -42,6 +43,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -129,6 +132,8 @@ fun ArticleCard(
         article.imageUrl?.let { url ->
             AsyncImage(
                 model = url,
+                // Decorative: the title and the extract are already announced above it, and a
+                // description for a photograph of the subject repeats what the text already says.
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 imageLoader = LocalImageLoader.current,
@@ -187,7 +192,7 @@ fun ArticleCard(
             Box(
                 modifier = Modifier
                     .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(percent = 50))
-                    .clickable(role = Role.Button) {
+                    .clickable(role = Role.Button, onClickLabel = "Open the full article") {
                         // Recorded before the deeplink: opening the browser can background the
                         // process, and an event queued after that may never run.
                         onReadMoreClick()
@@ -288,6 +293,12 @@ private fun LikeButton(
     Box(
         modifier = modifier
             .size(44.dp)
+            // The visible disc stays 44dp; the touch target grows to the 48dp the platform asks
+            // for, so a tap that lands just outside the heart still registers.
+            .minimumInteractiveComponentSize()
+            // A toggle that announces only "Like" leaves a screen reader user unable to tell
+            // whether the tap already landed, so the state travels with the control.
+            .semantics { stateDescription = if (liked) "Liked" else "Not liked" }
             .clickable(role = Role.Button, onClickLabel = "Like") {
                 onLike()
                 scope.launch {
