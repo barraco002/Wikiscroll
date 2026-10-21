@@ -1,0 +1,22 @@
+Wikiscroll
+Copyright 2026 barraco002 and Wikiscroll contributors
+
+This product is a modified fork of WikWok
+(https://github.com/terrakok/WikWok), Copyright 2024-2026
+Konstantin Tskhovrebov (terrakok), licensed under the
+Apache License, Version 2.0.
+
+Original source: https://github.com/terrakok/WikWok
+Forked at commit: see the initial "fork" commit in this repository's history.
+
+Modifications made by the Wikiscroll project:
+  - Project identity, README and documentation rewritten for Wikiscroll.
+  - (Phase 2) RecommendationEngine and interest model added under sharedUI.
+  - (Phase 3) WikiscrollScreen feed UI, dwell-time instrumentation and
+    like/confetti interaction added under sharedUI.
+
+The upstream LICENSE file is preserved verbatim in LICENSE.
+Wikipedia content is provided by the Wikimedia REST API and is licensed
+under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+
+Wikiscroll is not affiliated with or endorsed by the Wikimedia Foundation.
