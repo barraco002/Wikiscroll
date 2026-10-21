@@ -2,6 +2,7 @@ package com.github.terrakok.wikwok.ui
 
 import com.github.terrakok.wikwok.data.WikipediaRepository
 import com.github.terrakok.wikwok.domain.Article
+import com.github.terrakok.wikwok.domain.InterestState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -157,5 +158,38 @@ class WikiscrollViewModelTest {
 
         viewModel.dismissReward()
         assertEquals(null, viewModel.uiState.value.pendingReward)
+    }
+
+    @Test
+    fun seededTopicsBecomeTheOpeningProfile() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+
+        viewModel.seedInterests(listOf("Norse mythology", "Cosmology"))
+
+        val interest = viewModel.uiState.value.interest
+        assertEquals(InterestState.SEED_INTEREST_POINTS, interest.scoreOf("Norse mythology"))
+        assertEquals(InterestState.SEED_INTEREST_POINTS, interest.scoreOf("Cosmology"))
+    }
+
+    @Test
+    fun seedingTrimsRepeatsAndBlanks() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+
+        viewModel.seedInterests(listOf("  History  ", "", "   ", "history"))
+
+        val scores = viewModel.uiState.value.interest.userInterestScores
+        assertEquals(mapOf("History" to InterestState.SEED_INTEREST_POINTS), scores)
+    }
+
+    @Test
+    fun seedingCapsTheNumberOfTopics() = runTest(dispatcher.scheduler) {
+        val viewModel = WikiscrollViewModel(FakeRepository())
+
+        viewModel.seedInterests((1..50).map { "Topic " + it })
+
+        assertEquals(
+            WikiscrollViewModel.MAX_SEED_TOPICS,
+            viewModel.uiState.value.interest.userInterestScores.size,
+        )
     }
 }

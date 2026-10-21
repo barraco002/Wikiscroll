@@ -139,6 +139,32 @@ class WikiscrollViewModel(
         recordEvent(articleId) { article -> LikeAction(article.id, article.categories) }
     }
 
+    /**
+     * Installs the topics chosen in the onboarding as the opening profile.
+     *
+     * This is the cold start fix. Without it the first cards are decided by an empty profile, so the
+     * engine has nothing to exploit and the reader judges the product on a random article. Seeding
+     * gives the exploitation arm something to aim at from the first swipe.
+     *
+     * Topics are trimmed, deduplicated case-insensitively and capped at [MAX_SEED_TOPICS]. Blank
+     * input is ignored rather than stored, because a whitespace key would never match a category.
+     *
+     * The feed is not rebuilt here: a profile that changes under an already loaded card would make
+     * the next pick inconsistent with what is on screen. Callers seed before the first read.
+     *
+     * @param topics free-text interests, in the reader's own words.
+     */
+    fun seedInterests(topics: List<String>) {
+        val seeded = topics
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .take(MAX_SEED_TOPICS)
+        if (seeded.isEmpty()) return
+
+        _uiState.update { state -> state.copy(interest = state.interest.seededWith(seeded)) }
+    }
+
     /** Consumes the pending reward so the UI does not show it twice. */
     fun dismissReward() {
         _uiState.update { it.copy(pendingReward = null) }
@@ -262,5 +288,8 @@ class WikiscrollViewModel(
 
         /** Edition used when the caller does not choose one. */
         const val DEFAULT_LANGUAGE: String = "en"
+
+        /** Ceiling on seeded topics, matching what the onboarding grid can hold on one screen. */
+        const val MAX_SEED_TOPICS: Int = 10
     }
 }

@@ -101,9 +101,10 @@ class RecommendationEngine(
      * split, a session where every card is rejected explores more. On the exploration arm,
      * candidates with at least one unexplored category are equally likely, which is the serendipity
      * path.
-     * 3. **Exploitation (and the exploration fallback).** Candidates whose categories appear in
-     * [InterestState.topCategories] are sampled proportionally to their strongest category score,
-     * so a strong category dominates without monopolising the feed.
+     * 3. **Exploitation (and the exploration fallback).** Candidates with at least one preferred
+     * category are sampled proportionally to [InterestState.matchScore], so a strong category
+     * dominates without monopolising the feed. Preferred means an exact hit or a seeded topic found
+     * inside a category name, which is how free-text interests from the onboarding take effect.
      *
      * If neither arm finds a candidate, a uniform pick from the filtered pool is returned.
      *
@@ -127,10 +128,9 @@ class RecommendationEngine(
             }
         }
 
-        val topCategories = currentState.topCategories().toSet()
-        if (topCategories.isNotEmpty()) {
+        if (currentState.userInterestScores.isNotEmpty()) {
             val relevant = pool.filter { candidate ->
-                candidate.categories.any { it in topCategories }
+                candidate.categories.any { currentState.isPreferred(it) }
             }
             if (relevant.isNotEmpty()) {
                 return relevant.weightedPick { candidate -> candidate.interestWeight(currentState) }
@@ -172,9 +172,9 @@ class RecommendationEngine(
         return last()
     }
 
-    /** Strongest category score of this candidate, floored at one so weights stay positive. */
+    /** Combined interest score of this candidate, floored at one so weights stay positive. */
     private fun Article.interestWeight(state: InterestState): Double =
-        categories.maxOfOrNull { state.scoreOf(it) }?.coerceAtLeast(1)?.toDouble() ?: 1.0
+        state.matchScore(categories).coerceAtLeast(1).toDouble()
 
     companion object {
         /** Minimum dwell, in milliseconds, that counts as interest. */

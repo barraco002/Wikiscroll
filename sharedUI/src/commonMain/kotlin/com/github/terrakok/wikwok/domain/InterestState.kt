@@ -45,14 +45,49 @@ data class InterestState(
     fun scoreOf(category: String): Int = userInterestScores[category] ?: 0
 
     /**
+     * Points earned by [categories], exact matches and seeded topics alike.
+     *
+     * Exact matches are the learned path: they are what swiping produces. Seeded topics are free
+     * text chosen before the feed existed ("nordic mythology"), which never equals a Wikipedia
+     * category ("Category:Norse mythology"), so a whole-word, case-insensitive containment pass runs
+     * as well. Whole word matters: without it a seed for "art" would match "Category:Artificial
+     * intelligence" and every other word that merely starts the same way.
+     *
+     * @param categories Wikipedia categories of one candidate article.
+     */
+    fun matchScore(categories: List<String>): Int {
+        if (categories.isEmpty() || userInterestScores.isEmpty()) return 0
+        var total = 0
+        for (category in categories) {
+            userInterestScores[category]?.let { total += it }
+            for ((topic, score) in userInterestScores) {
+                if (score <= 0 || topic == category) continue
+                if (category.containsTopic(topic)) total += score
+            }
+        }
+        return total
+    }
+
+    /**
+     * True when [category] matches a positive interest, exactly or through a seeded topic.
+     *
+     * This is the exploitation test. It is deliberately looser than [scoreOf]: a category that the
+     * reader asked for by name is relevant even though the engine never scored it directly.
+     */
+    fun isPreferred(category: String): Boolean =
+        scoreOf(category) > 0 ||
+            userInterestScores.any { (topic, score) -> score > 0 && topic != category && category.containsTopic(topic) }
+
+    /**
      * True when [category] carries no evidence at all: no score and no recorded visit.
      *
      * Both conditions are required. A category with a positive score must never enter the
      * exploration arm just because a reconstructed state has not populated [seenCategories], and a
-     * category that was served but scored zero is not a serendipity candidate either.
+     * category that was served but scored zero is not a serendipity candidate either. A seeded topic
+     * counts as evidence, so an article that answers a stated interest is never sold as serendipity.
      */
     fun isUnexplored(category: String): Boolean =
-        scoreOf(category) == 0 && category !in seenCategories
+        !isPreferred(category) && category !in seenCategories
 
     /** Categories with a positive score, highest first, at most [limit] entries. */
     fun topCategories(limit: Int = DEFAULT_TOP_LIMIT): List<String> =
@@ -106,6 +141,22 @@ data class InterestState(
      * The clamp is the reason a rejected category can recover: a negative score is never stored,
      * so one good article is enough to bring a category back into the exploitation pool.
      */
+    /**
+     * Adds [topics] as known interests worth [SEED_INTEREST_POINTS] each.
+     *
+     * Seeding uses the maximum rather than a sum, so calling it twice with the same topic cannot
+     * inflate the weight past the seeded value, and a topic the reader already learned to like keeps
+     * whatever higher score it earned.
+     */
+    internal fun seededWith(topics: List<String>): InterestState {
+        if (topics.isEmpty()) return this
+        val updated = userInterestScores.toMutableMap()
+        for (topic in topics) {
+            updated[topic] = maxOf(updated[topic] ?: 0, SEED_INTEREST_POINTS)
+        }
+        return copy(userInterestScores = updated)
+    }
+
     internal fun withScoreDelta(categories: List<String>, delta: Int): InterestState {
         if (categories.isEmpty() || delta == 0) return this
         val updated = userInterestScores.toMutableMap()
@@ -155,7 +206,35 @@ data class InterestState(
 
         /** Number of recent outcomes the adaptive band looks at. */
         const val SIGNAL_WINDOW: Int = 10
+
+        /**
+         * Points given to a topic chosen in the onboarding.
+         *
+         * Five dwells' worth, which is enough to make the seeded topics the strongest signal in a
+         * fresh profile without making them unbeatable once the reader starts swiping.
+         */
+        const val SEED_INTEREST_POINTS: Int = 10
     }
+}
+
+/**
+ * True when this string contains [topic] as whole words, ignoring case.
+ *
+ * A plain "contains" would make a seed for "art" match "Artificial intelligence" and "Bartholomew".
+ * Word boundaries are checked by hand rather than with a regular expression because this runs for
+ * every category of every candidate and a compiled pattern per comparison is not worth it.
+ */
+private fun String.containsTopic(topic: String): Boolean {
+    if (topic.isBlank()) return false
+    var index = indexOf(topic, ignoreCase = true)
+    while (index >= 0) {
+        val before = if (index == 0) ' ' else this[index - 1]
+        val afterIndex = index + topic.length
+        val after = if (afterIndex >= length) ' ' else this[afterIndex]
+        if (!before.isLetterOrDigit() && !after.isLetterOrDigit()) return true
+        index = indexOf(topic, index + 1, ignoreCase = true)
+    }
+    return false
 }
 
 /**
