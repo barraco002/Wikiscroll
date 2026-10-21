@@ -73,6 +73,7 @@ data class WikiscrollUiState(
  * @param engine recommendation policy. Stateless apart from its random source.
  * @param language wiki edition the feed reads from.
  * @param nowEpochDay clock used for streaks, injected so tests control the calendar.
+ * @param initialTopics topics chosen before the feed existed, applied before the first read.
  */
 class WikiscrollViewModel(
     private val repository: WikipediaRepository,
@@ -81,6 +82,7 @@ class WikiscrollViewModel(
     private val nowEpochDay: () -> Long = {
         Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays().toLong()
     },
+    initialTopics: List<String> = emptyList(),
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<WikiscrollUiState> = MutableStateFlow(WikiscrollUiState())
@@ -92,6 +94,7 @@ class WikiscrollViewModel(
     private val bufferMutex: Mutex = Mutex()
 
     init {
+        seedInterests(initialTopics)
         start()
     }
 
