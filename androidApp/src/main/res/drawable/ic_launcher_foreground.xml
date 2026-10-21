@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Wikiscroll launch mark: a geometric W drawn as one continuous stroke that reads as a swipe
+    gesture falling through the frame. The whole shape lives inside the 66dp safe circle of the
+    108dp adaptive canvas, so no launcher mask can clip it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M30,36 L42,72 L54,48 L66,72 L78,36"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFD166"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

@@ -226,11 +226,13 @@ class RecommendationEngineTest {
         id: String,
         categories: List<String>,
         isPopular: Boolean = false,
+        imageUrl: String? = null,
     ) = Article(
         id = id,
         title = id,
         categories = categories,
         extract = feedExtract,
+        imageUrl = imageUrl,
         isPopular = isPopular,
     )
 
@@ -339,6 +341,39 @@ class RecommendationEngineTest {
 
         assertEquals(RecommendationEngine.SCORE_LIKE_POINTS, liked.scoreOf("History"))
         assertEquals(RecommendationEngine.SCORE_READ_MORE_POINTS, read.scoreOf("History"))
+    }
+
+    @Test
+    fun articlesWithoutAnImageArePenalised() {
+        val engine = engine(17L)
+        val withPicture = card("en:photo", listOf("History", "Europe"), imageUrl = "https://x/photo.jpg")
+        val withoutPicture = card("en:plain", listOf("History", "Europe"))
+
+        var photoWins = 0
+        repeat(2_000) {
+            val picked = engine.nextArticle(listOf(withPicture, withoutPicture), InterestState())
+            if (picked?.id == "en:photo") photoWins++
+        }
+
+        // 1.0 against 0.8 is 55 to 45, so the bar is deliberately low: this is a tie-breaker,
+        // not a filter.
+        assertTrue(photoWins > 1_000, "a lead image should break the tie, got $photoWins of 2000")
+    }
+
+    @Test
+    fun aPopularArticleWithoutAnImageIsNotPenalised() {
+        val engine = engine(19L)
+        val landmark = card("en:landmark", listOf("History", "Europe"), isPopular = true)
+        val plain = card("en:photo", listOf("History", "Europe"), imageUrl = "https://x/photo.jpg")
+
+        var landmarkWins = 0
+        repeat(2_000) {
+            val picked = engine.nextArticle(listOf(landmark, plain), InterestState())
+            if (picked?.id == "en:landmark") landmarkWins++
+        }
+
+        // 2.0 against 1.0: the exemption keeps authority ahead of the visual penalty.
+        assertTrue(landmarkWins > 1_100, "authority must still dominate, got $landmarkWins of 2000")
     }
 
     // endregion

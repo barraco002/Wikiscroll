@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A shallow radial fall from #1E1E2E in the centre to #0A0A0F at the corners. Safe on API 24
+    and up; the adaptive icon that references it only exists from API 26.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="80"
+                android:startColor="#1E1E2E"
+                android:endColor="#0A0A0F" />
+        </aapt:attr>
+    </path>
+</vector>

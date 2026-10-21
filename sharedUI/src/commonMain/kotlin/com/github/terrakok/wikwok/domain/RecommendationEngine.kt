@@ -296,6 +296,10 @@ class RecommendationEngine(
             weight *= AUTHORITY_BONUS
         }
 
+        if (!isPopular && imageUrl == null) {
+            weight *= NO_IMAGE_PENALTY
+        }
+
         return weight
     }
 
@@ -348,6 +352,14 @@ class RecommendationEngine(
 
         /** Multiplier for an article that appears in the most viewed ranking. */
         const val AUTHORITY_BONUS: Double = 2.0
+
+        /**
+         * Multiplier for a card that would render without a lead image.
+         *
+         * Not a veto: a well-matched article with no picture still beats a poor match that has one.
+         * The effect is a tie-breaker, which is all a visual signal should be worth.
+         */
+        const val NO_IMAGE_PENALTY: Double = 0.8
 
         /**
          * Affinity score at which the interest multiplier reaches 1.5.

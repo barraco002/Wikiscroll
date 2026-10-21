@@ -102,6 +102,9 @@ fun ArticleCard(
     val onLikeClick = remember(article.id, onLike) { { onLike(article.id) } }
     val onOpenClick = remember(article, onOpen) { { onOpen(article) } }
     val onReadMoreClick = remember(article.id, onReadMore) { { onReadMore(article.id) } }
+    // Keyed on the id, not rebuilt per frame: a pager scroll recomposes the card on every pixel,
+    // and a fresh gradient for each of those is an allocation nobody sees.
+    val backdrop = remember(article.id) { categoryGradient(article.categories) }
 
     Box(
         modifier = modifier
@@ -111,13 +114,15 @@ fun ArticleCard(
         // The fallback wash sits underneath the image, so an article without a thumbnail still gets
         // a graded backdrop instead of a flat rectangle.
         if (article.imageUrl == null) {
-            // A solid backdrop, the same treatment the official Wikipedia app gives a card
-            // without a lead image. The generative gradient that used to live here competed with
-            // the headline and read as decoration rather than as content.
+            // A colour field built from the article's own categories. Flat black was correct and
+            // dead: when every third card is the same rectangle the feed stops feeling like a
+            // place. The palette stays dark enough for white body text, and it is chosen from a
+            // word match rather than from a hash so two articles on the same subject share a
+            // backdrop instead of colliding randomly.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(FallbackBackground)
+                    .background(backdrop)
             )
         }
 
@@ -392,12 +397,61 @@ private const val TopScrimAlpha = 0.45f
 private const val BurstFinished = 1f
 
 /**
- * Backdrop for a card whose article has no lead image.
+ * Palettes for cards without a lead image, ordered from specific to generic.
  *
- * Flat on purpose. Anything with structure draws the eye first, and the only thing worth
- * looking at on these cards is the headline.
+ * The first entry with a keyword present among the article categories wins. Every pair stays under
+ * 25% luminance at its lightest stop, which is the ceiling that keeps white body text at 0.8 alpha
+ * readable on top.
+ *
+ * Keywords are matched against whole words. Substring matching would hand the war palette to every
+ * article about software, since "software" contains "war".
  */
-private val FallbackBackground = Color(0xFF1E1E1E)
+private val CategoryPalettes: List<Pair<List<String>, List<Color>>> = listOf(
+    listOf("history", "war", "politics", "guerra", "historia") to
+        listOf(Color(0xFF3A2C1E), Color(0xFF17110C)),
+    listOf("science", "biology", "physics", "medicine", "ciencia") to
+        listOf(Color(0xFF10293A), Color(0xFF0A141C)),
+    listOf("film", "television", "music", "album", "cine", "musica") to
+        listOf(Color(0xFF2C1A36), Color(0xFF140D1B)),
+    listOf("biography", "people", "births", "deaths", "biografia") to
+        listOf(Color(0xFF252C34), Color(0xFF11151A)),
+    listOf("sport", "football", "olympic", "deporte") to
+        listOf(Color(0xFF1B3226), Color(0xFF0D1712)),
+    listOf("geography", "city", "country", "geografia") to
+        listOf(Color(0xFF2A2A18), Color(0xFF14140C)),
+)
+
+/** Backdrop used when no category matches. */
+private val NeutralGradient: List<Color> = listOf(Color(0xFF1E1E1E), Color(0xFF101010))
+
+/** Splits a category list into lowercase words, so keywords match as words and never as prefixes. */
+private fun categoryWords(categories: List<String>): Set<String> =
+    categories
+        .joinToString(separator = " ")
+        .lowercase()
+        .split(NON_WORD)
+        .filter { word -> word.isNotEmpty() }
+        .toSet()
+
+/**
+ * Picks the two stops of the fallback backdrop for [categories].
+ *
+ * Pure and free of Compose state on purpose: the mapping is data, and keeping it in a function that
+ * returns colours means it can be asserted in a unit test without a composition.
+ */
+internal fun categoryColors(categories: List<String>): List<Color> {
+    if (categories.isEmpty()) return NeutralGradient
+
+    val words = categoryWords(categories)
+    return CategoryPalettes.firstOrNull { (keywords, _) -> keywords.any { it in words } }?.second
+        ?: NeutralGradient
+}
+
+/** The backdrop itself, built from [categoryColors]. */
+internal fun categoryGradient(categories: List<String>): Brush =
+    Brush.verticalGradient(categoryColors(categories))
+
+private val NON_WORD = Regex("[^a-z0-9]+")
 
 
 private val BackgroundTop = Color(0xFF101018)
