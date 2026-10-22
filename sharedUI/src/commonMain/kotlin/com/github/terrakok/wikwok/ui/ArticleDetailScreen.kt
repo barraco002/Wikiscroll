@@ -50,6 +50,8 @@ import com.github.terrakok.wikwok.domain.Article
  * @param article content to render.
  * @param onBack invoked when the reader leaves the detail.
  * @param onOpenArticle invoked when the reader asks for the original page.
+ * @param summaryState state of the summarization action for this article.
+ * @param onSummarize invoked when the reader asks Claude for a summary.
  * @param modifier applied to the root box.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +60,8 @@ fun ArticleDetailScreen(
     article: Article,
     onBack: () -> Unit,
     onOpenArticle: () -> Unit,
+    summaryState: SummaryState = SummaryState.Idle,
+    onSummarize: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val background = MaterialTheme.colorScheme.background
@@ -133,6 +137,10 @@ fun ArticleDetailScreen(
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
                     )
                 }
+                SummarySection(
+                    state = summaryState,
+                    onSummarize = onSummarize,
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onOpenArticle) {
                     Text(text = "Read full article")

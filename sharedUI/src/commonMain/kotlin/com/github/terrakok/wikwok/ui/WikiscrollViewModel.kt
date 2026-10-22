@@ -16,6 +16,9 @@ import com.github.terrakok.wikwok.domain.InterestState
 import com.github.terrakok.wikwok.domain.RecommendationEngine
 import com.github.terrakok.wikwok.domain.Reward
 import com.github.terrakok.wikwok.domain.SessionMetrics
+import com.github.terrakok.wikwok.domain.Summarizer
+import com.github.terrakok.wikwok.domain.SummaryOutcome
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,6 +90,7 @@ data class WikiscrollUiState(
  * @param nowEpochDay clock used for streaks, injected so tests control the calendar.
  * @param initialTopics topics chosen before the feed existed, applied before the first read.
  * @param profileStore persistence for the interest profile, or null to run without one.
+ * @param summarizer article summarizer, or null to run without the feature.
  */
 class WikiscrollViewModel(
     private val repository: WikipediaRepository,
@@ -97,6 +101,7 @@ class WikiscrollViewModel(
     },
     initialTopics: List<String> = emptyList(),
     private val profileStore: ProfileStore? = null,
+    private val summarizer: Summarizer? = null,
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<WikiscrollUiState> = MutableStateFlow(WikiscrollUiState())
@@ -125,6 +130,15 @@ class WikiscrollViewModel(
 
     /** Serialises buffer refills so two swipes in a row cannot load the same article twice. */
     private val bufferMutex: Mutex = Mutex()
+
+    /** Panel state for the summarization action. */
+    private val _summary = MutableStateFlow<SummaryState>(SummaryState.Idle)
+
+    /** What the detail panel renders for the summarize action. */
+    val summary: StateFlow<SummaryState> = _summary.asStateFlow()
+
+    /** In-flight summarization, cancelled when the reader leaves or asks again. */
+    private var summaryJob: Job? = null
 
     init {
         restoreProfile()
@@ -255,6 +269,40 @@ class WikiscrollViewModel(
         // Stored immediately: a reader who picks topics and closes the app before the first swipe
         // would otherwise be asked again, because the only other write happens on an interaction.
         persistProfile()
+    }
+
+    /**
+     * Asks the summarizer for a summary of [article] and publishes the outcome.
+     *
+     * A request already in flight is cancelled rather than queued: the reader pressed a button for the
+     * card in front of them, and an answer about the previous card is not an answer.
+     */
+    fun summarize(article: Article) {
+        val target = summarizer
+        if (target == null) {
+            _summary.value = SummaryState.Failed(SUMMARY_UNAVAILABLE_REASON, needsConfiguration = true)
+            return
+        }
+
+        summaryJob?.cancel()
+        _summary.value = SummaryState.Loading
+        summaryJob = viewModelScope.launch {
+            _summary.value = target.summarize(article, language).toPanelState(article.id)
+        }
+    }
+
+    /** Clears the panel, cancelling a request whose result nobody is waiting for any more. */
+    fun dismissSummary() {
+        summaryJob?.cancel()
+        summaryJob = null
+        _summary.value = SummaryState.Idle
+    }
+
+    /** Maps a domain outcome onto the panel state, keeping the article it belongs to. */
+    private fun SummaryOutcome.toPanelState(articleId: String): SummaryState = when (this) {
+        is SummaryOutcome.Ready -> SummaryState.Ready(articleId, bullets, model)
+        is SummaryOutcome.Unconfigured -> SummaryState.Failed(reason, needsConfiguration = true)
+        is SummaryOutcome.Failed -> SummaryState.Failed(reason)
     }
 
     /** Consumes the pending reward so the UI does not show it twice. */

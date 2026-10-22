@@ -88,6 +88,7 @@ fun WikiscrollScreen(
     // one tap invalidates one button instead of the whole pager.
     val likedIds = viewModel.likedIds
     val metrics by viewModel.metrics.collectAsStateWithLifecycle()
+    val summary by viewModel.summary.collectAsStateWithLifecycle()
     var selectedArticle by remember { mutableStateOf<Article?>(null) }
     var showMetrics by remember { mutableStateOf(false) }
 
@@ -96,7 +97,12 @@ fun WikiscrollScreen(
     // article and presses back leaves the app instead of returning to the feed. The panel closes
     // first, so one press never unwinds two surfaces.
     BackHandler(enabled = selectedArticle != null || showMetrics) {
-        if (showMetrics) showMetrics = false else selectedArticle = null
+        if (showMetrics) {
+            showMetrics = false
+        } else {
+            selectedArticle = null
+            viewModel.dismissSummary()
+        }
     }
 
     // Hoisted out of the pager item so the callbacks keep one identity across recompositions. A
@@ -188,8 +194,13 @@ fun WikiscrollScreen(
             } else {
                 ArticleDetailScreen(
                     article = article,
-                    onBack = { selectedArticle = null },
+                    onBack = {
+                        selectedArticle = null
+                        viewModel.dismissSummary()
+                    },
                     onOpenArticle = { uriHandler.openUri(article.canonicalUrl()) },
+                    summaryState = summary,
+                    onSummarize = { viewModel.summarize(article) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }

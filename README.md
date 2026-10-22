@@ -20,6 +20,7 @@ This repository is an Apache-2.0 fork of [WikWok](https://github.com/terrakok/Wi
 - **Dopamine-driven recommendation algorithm.** A variable-ratio schedule drives the feed: exploitation of high-interest categories most of the time, unpredictable exploration the rest. The reward is the article, and the interval is never announced.
 - **Dwell-aware interest model.** Reading time, not clicks, is the primary signal. Every stay is judged against the time the card needed, so an article that holds attention raises the weight of its categories and one abandoned before half of its reading time lowers it.
 - **The profile is persisted.** Each recorded interaction is encoded into a versioned JSON envelope and written to the platform settings store, so a restart resumes the model instead of starting over. A schema version this build does not own is dropped rather than migrated: losing a profile costs one session, a decode path for every historical schema costs a crash on launch.
+- **Experimental AI summaries.** The detail screen can ask Claude for three bullets about the article in front of the reader. The feature is off unless the build carries a credential, and it is labelled with the model that wrote it: see [AI Integration](#ai-integration-claude-api).
 - **Local session metrics.** A counters panel reports articles read, reading time, average per card, likes, opens and fast swipes. Every number comes from the same events the engine scored, on the device, with no identifier and no network call: the retention claim is one the reader can audit.
 - **Daily streaks.** Consecutive-day reading is tracked as `(lastVisitEpochDay, streak)`, so time zones and daylight-saving changes cannot break it.
 - **Variable ratio rewards.** Every tenth article pays out from a weighted table. The interval is fixed and the payout is not - the classic variable-ratio shape, applied to knowledge instead of slot reels.
@@ -159,6 +160,36 @@ fun next(current: Article, candidates: List<Article>, state: InterestState, rng:
 }
 ```
 
+## AI Integration (Claude API)
+
+v1.7.0 adds an experimental summarize action to the article detail screen. It sends the card's extract to the Anthropic Messages API (`claude-3-haiku-20240307`) and renders three bullets, with the model identifier printed above them.
+
+The feature is off unless the build has a credential. A repository that shipped a key would ship a bill, so the key is read at runtime instead:
+
+| Platform | Source |
+|---|---|
+| Desktop (JVM) | `ANTHROPIC_API_KEY`, or `-Danthropic.api.key`, or `anthropic.api.key` in `local.properties` |
+| Android | `ANTHROPIC_API_KEY` in the process environment; a store build passes its own value to `App(claudeKey = ...)` |
+| iOS | `ANTHROPIC_API_KEY` in the scheme environment |
+| Web | Nothing. A key in a browser bundle is a published key, so the web target reports unconfigured and the call has to go through a proxy that holds the credential |
+
+With no key the panel reports itself as unconfigured and no request leaves the device. That is a state, not a failure: the button, the spinner and the card are part of the product, and only the network call is conditional.
+
+What is sent: the title, the language edition and at most 4 000 characters of extract. What is not sent: the reading profile, the session counters, the article ids and the canonical URL. A summary is generated text, so it is labelled with the model that produced it; a bullet copied out of it is a claim, not a citation.
+
+Every failure is a value rather than an exception. A rejected key, a rate limit, an unreachable host and an empty answer each map to one sentence, and cancellation is rethrown instead of being rendered as an error. The request overrides the shared client's twenty second timeout for the generation round trip only.
+
+Tests cover the request contract against a mock engine (headers, model, truncation), the parser that turns an answer into three lines whatever shape it arrives in, and the panel state machine.
+
+To try it on desktop:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+./gradlew :desktopApp:run
+```
+
+Or put `anthropic.api.key=sk-ant-...` in `local.properties`, which is git-ignored.
+
 ## Project Layout
 
 ```text
@@ -208,6 +239,7 @@ Background research and the full task breakdown live in [docs/RESEARCH.md](docs/
 - [x] **Phase 2 - Recommendation engine.** `RecommendationEngine`, `InterestState`, adaptive 70/30 policy, interaction weights, quality gate, narrative pathing, authority multiplier, anti-boredom penalties, streak and reward tables.
 - [x] **Phase 3 - Feed UI.** `WikiscrollScreen` on `VerticalPager`, settle-aware dwell timer, confetti on like, reward reveal every tenth article, onboarding with interest seeding, most-viewed cold start.
 - [x] **Phase 4 - Persistence.** The interest vector survives a restart as a versioned JSON envelope in the platform settings store; a local counters panel behind the chart control reports what the session actually did.
+- [x] **Phase 6 - AI summaries.** Optional Claude integration behind a runtime credential, with its own panel states, parser and tests.
 - [ ] **Phase 5 - Polish.** Offline cache of seen articles, connectivity-aware loading, accessibility pass over the card and the pager.
 
 Contributions are welcome: the domain layer has a stable contract and 138 seeded tests, and CI runs them on every push to `master`. Open an issue with the mechanism you want to change and the evidence behind it.

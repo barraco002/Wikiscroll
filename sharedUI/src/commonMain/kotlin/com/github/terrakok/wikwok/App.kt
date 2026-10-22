@@ -20,6 +20,8 @@ import com.github.terrakok.wikwok.data.ProfileStore
 import com.github.terrakok.wikwok.data.SettingsStorage
 import com.github.terrakok.wikwok.data.imageCachePath
 import com.github.terrakok.wikwok.data.WikipediaRepositoryImpl
+import com.github.terrakok.wikwok.data.claude.ClaudeSummarizer
+import com.github.terrakok.wikwok.data.claude.platformClaudeApiKey
 import com.github.terrakok.wikwok.theme.AppTheme
 import com.github.terrakok.wikwok.ui.OnboardingScreen
 import com.github.terrakok.wikwok.ui.WikiscrollScreen
@@ -48,16 +50,20 @@ internal val LocalImageLoader = compositionLocalOf<ImageLoader> { error("ImageLo
  * one store instance serves the flag and the profile instead of two objects owning one file.
  *
  * @param onThemeChanged invoked with the resolved dark-theme flag, wired by the platform entry point.
+ * @param claudeKey credential for the summarization feature, or null to ship without it. Read from
+ *   the platform environment by default; a store build supplies it from its own configuration.
  */
 @Composable
 fun App(
     onThemeChanged: @Composable (isDark: Boolean) -> Unit = {},
+    claudeKey: String? = platformClaudeApiKey(),
 ) = AppTheme(onThemeChanged) {
     val context = LocalPlatformContext.current
     val imageLoader = remember(context) { createImageLoader(context) }
     val repository = remember { WikipediaRepositoryImpl() }
     val settings: SettingsStorage = remember { PlatformSettingsStorage() }
     val profileStore = remember(settings) { ProfileStore(settings) }
+    val summarizer = remember(claudeKey) { ClaudeSummarizer(apiKey = claudeKey) }
     var chosenTopics by remember {
         mutableStateOf<List<String>?>(if (settings.isOnboardingCompleted) emptyList() else null)
     }
@@ -78,6 +84,7 @@ fun App(
                     repository = repository,
                     initialTopics = topics,
                     profileStore = profileStore,
+                    summarizer = summarizer,
                 )
             }
             WikiscrollScreen(
